@@ -179,11 +179,22 @@ def test_clean_store_app_low():
 
 
 def test_spoof_forced_high_even_with_low_score():
-    app = App(package="com.google.android.fakecore", installer=None,
+    # First-party name from the generic sideload installer -> impostor, forced HIGH.
+    app = App(package="com.google.android.fakecore",
+              installer="com.google.android.packageinstaller",
               first_install=datetime(2019, 3, 3))
     score_app(app, NOW)
     assert app.risk == "HIGH"
     assert scanner.SPOOF_REASON == app.reasons[0]
+
+
+def test_genuine_oem_preload_is_protected_and_low():
+    # Regression (real Samsung device): a first-party app with a null installer is
+    # a genuine preload, not sideloaded adware -- protected, never scored risky.
+    app = App(package="com.sec.android.app.kidshome", installer=None, hidden=True,
+              first_install=datetime(2024, 5, 20))
+    score_app(app, NOW)
+    assert app.protected and app.risk == "Low" and app.reasons == []
 
 
 def test_threshold_boundaries():

@@ -19,6 +19,15 @@ def test_friendly_messages():
     assert "no longer installed" in _friendly("Failure [not installed for 0]").lower()
 
 
+def test_run_survives_non_utf8_output():
+    """A real phone can emit bytes the Windows cp1252 locale can't decode
+    (non-Latin app names). run() must decode UTF-8 with replacement, not crash.
+    Regression: 'charmap codec can't decode byte 0x81' killed the scan thread."""
+    code = r"import sys; sys.stdout.buffer.write(b'app\x81name'); sys.exit(0)"
+    out = adb.Adb(sys.executable).run(["-c", code])
+    assert "app" in out and "name" in out   # decoded, no UnicodeDecodeError
+
+
 def test_find_adb_prefers_bundled_meipass(tmp_path, monkeypatch):
     """The packaged exe ships ADB in sys._MEIPASS; find_adb must use it."""
     bundle = tmp_path / "platform-tools"

@@ -237,6 +237,12 @@ def looks_random(package):
 
 def score_app(app, now):
     """Set app.score/risk/reasons from its signals. `now` is injected for tests."""
+    if app.protected:
+        # Genuine system/OEM app: never risky, never actioned -- don't score it.
+        # (Real preloads have a null installer, which otherwise reads as
+        # 'sideloaded' and produced dangerous false positives on real hardware.)
+        app.score, app.risk, app.reasons = 0, "Low", []
+        return app
     signals = {
         "overlay": app.overlay,
         "sideloaded": app.installer is None,
@@ -353,12 +359,19 @@ def demo():
     score_app(clean, now)
     assert clean.risk == "Low", clean.score
 
-    # Spoofed system name, sideloaded -> forced HIGH with spoof note.
-    spoof = App(package="com.google.android.fakecore", installer=None,
+    # First-party name from the generic sideload installer -> forced HIGH + note.
+    spoof = App(package="com.google.android.fakecore",
+                installer="com.google.android.packageinstaller",
                 first_install=datetime(2020, 1, 1))
     score_app(spoof, now)
     assert spoof.risk == "HIGH"
     assert SPOOF_REASON in spoof.reasons
+
+    # Real Samsung preload (first-party name, null installer) -> protected, Low.
+    preload = App(package="com.sec.android.app.kidshome", installer=None,
+                  first_install=datetime(2020, 1, 1))
+    score_app(preload, now)
+    assert preload.protected and preload.risk == "Low" and not preload.reasons
     print("scanner.py demo OK")
 
 

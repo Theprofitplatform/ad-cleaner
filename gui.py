@@ -18,6 +18,7 @@ from actions import (
     ActionLog, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
     pause, reboot, reset_app_data, resume, stop_all, undo, uninstall,
 )
+from crashes import read_crash_report, summarize
 from device import read_device_stats
 from scanner import build_inventory
 from setup_helper import download_platform_tools
@@ -288,6 +289,7 @@ class AdCleanerApp:
         self._build_apps_tab(nb)
         self._build_history_tab(nb)
         self._build_device_tab(nb)
+        self._build_crashes_tab(nb)
         self._build_help_tab(nb)
         self.notebook = nb
 
@@ -459,6 +461,81 @@ class AdCleanerApp:
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
                             "It never deletes your photos, messages or accounts.",
                   style="Muted.TLabel", wraplength=760).pack(anchor="w", pady=(12, 0))
+
+    def _build_crashes_tab(self, nb):
+        tab = ttk.Frame(nb, padding=18)
+        nb.add(tab, text="Crashes")
+        ttk.Label(tab, text="Why did my phone crash?",
+                  font=(FONT, 14, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Reads the phone's own crash, freeze and restart records and "
+                            "explains them in plain English. Nothing is changed.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 12))
+
+        self.crash_summary = tk.Label(tab, text="Press “Check for crashes” below.",
+                                      anchor="w", font=(FONT, 12, "bold"),
+                                      bg=BASE, fg=MUTED, padx=12, pady=9)
+        self.crash_summary.pack(fill="x", pady=(0, 4))
+        self.crash_boot = ttk.Label(tab, text="", style="Muted.TLabel", wraplength=820)
+        self.crash_boot.pack(anchor="w", pady=(0, 8))
+
+        wrap = ttk.Frame(tab)
+        wrap.pack(fill="both", expand=True)
+        cols = ("when", "what", "detail")
+        self.crash_tree = ttk.Treeview(wrap, columns=cols, show="headings",
+                                       selectmode="browse")
+        for c, head, w in zip(cols, ("When", "What happened", "App / service"),
+                              (150, 260, 300)):
+            self.crash_tree.heading(c, text=head)
+            self.crash_tree.column(c, width=w, anchor="w", stretch=(c == "detail"))
+        self.crash_tree.tag_configure("fault", foreground=RED)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.crash_tree.yview)
+        self.crash_tree.configure(yscrollcommand=vsb.set)
+        self.crash_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.crash_btn = self._flat_button(tab, "🔎  Check for crashes",
+                                           self.on_check_crashes, SLATE, SLATE_HOT)
+        self.crash_btn.pack(anchor="w", pady=(10, 0))
+        self._enable_btn(self.crash_btn, False)
+
+    def on_check_crashes(self):
+        if self.busy or not self.serial:
+            return
+        self.busy = True
+        self._enable_btn(self.crash_btn, False)
+        self.crash_summary.config(
+            text="Reading the phone's crash records… (this can take a moment)",
+            bg=BASE, fg=MUTED)
+
+        def work():
+            try:
+                report = read_crash_report(self.adb)
+                self._post(self._show_crashes, report, None)
+            except Exception as e:
+                self._post(self._show_crashes, None, str(e))
+
+        self._run_bg(work)
+
+    def _show_crashes(self, report, err):
+        self.busy = False
+        if self.serial:
+            self._enable_btn(self.crash_btn, True)
+        if err:
+            bg, fg = BANNER["alert"]
+            self.crash_summary.config(
+                text="Couldn't read crash records. " + self._friendly(err), bg=bg, fg=fg)
+            return
+        text, kind = summarize(report["events"])
+        bg, fg = BANNER[kind]
+        self.crash_summary.config(text=text, bg=bg, fg=fg)
+        self.crash_boot.config(text="Last restart:  " + report["boot_text"])
+        self.crash_tree.delete(*self.crash_tree.get_children())
+        for i, e in enumerate(report["events"]):
+            self.crash_tree.insert("", "end", iid=str(i),
+                                   tags=(("fault",) if e.is_fault else ()),
+                                   values=(e.when, e.label, e.detail))
+        if not report["events"]:
+            self.crash_tree.insert("", "end", values=("", "No crash records found.", ""))
 
     def _build_help_tab(self, nb):
         tab = ttk.Frame(nb)
@@ -676,6 +753,7 @@ class AdCleanerApp:
         self._enable_btn(self.stop_btn, True)
         for b in self.dev_btns:
             self._enable_btn(b, True)
+        self._enable_btn(self.crash_btn, True)
         self._refresh_device()
         self.status_line("Phone connected. Scanning apps…")
         self.on_rescan()
@@ -692,6 +770,7 @@ class AdCleanerApp:
         self._enable_btn(self.stop_btn, False)
         for b in self.dev_btns:
             self._enable_btn(b, False)
+        self._enable_btn(self.crash_btn, False)
         for v in self.dev_vars.values():
             v.set("—")
         if was:

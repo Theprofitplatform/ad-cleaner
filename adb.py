@@ -68,8 +68,10 @@ class Adb:
         try:
             proc = subprocess.run(
                 self._cmd(args),
-                capture_output=True, text=True, timeout=timeout,
-                creationflags=_NO_WINDOW,
+                # Android emits UTF-8; decode as such (not the Windows cp1252 locale)
+                # and replace stray bytes so a scan never dies on a non-Latin app name.
+                capture_output=True, encoding="utf-8", errors="replace",
+                timeout=timeout, creationflags=_NO_WINDOW,
             )
         except subprocess.TimeoutExpired:
             raise AdbError(f"Command timed out after {timeout}s")

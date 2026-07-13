@@ -18,8 +18,22 @@ from actions import (
 from scanner import build_inventory
 from setup_helper import download_platform_tools
 
-RISK_BG = {"HIGH": "#ffd6d6", "Medium": "#ffe9c7", "Low": "#ffffff"}
-DOT = {"grey": "#9e9e9e", "orange": "#ff9800", "green": "#4caf50"}
+# --- palette ---------------------------------------------------------------
+FONT = "Segoe UI"
+BASE = "#ffffff"       # window / table background
+INK = "#111827"        # primary text
+MUTED = "#6b7280"      # secondary text
+PANEL = "#f8fafc"      # card background (wizard / details)
+HEADER_BG = "#0f172a"  # dark header band
+HEADER_INK = "#f8fafc"
+HEADER_MUTED = "#94a3b8"
+GREEN, GREEN_HOT = "#16a34a", "#15803d"
+RED, RED_HOT = "#dc2626", "#b91c1c"
+SLATE, SLATE_HOT = "#334155", "#475569"
+BTN_OFF = "#cbd5e1"    # disabled button background
+RISK_BG = {"HIGH": "#fee2e2", "Medium": "#fef3c7", "Low": "#ffffff"}
+RISK_FG = {"HIGH": "#991b1b", "Medium": "#92400e", "Low": INK}
+DOT = {"grey": "#94a3b8", "orange": "#f59e0b", "green": "#22c55e"}
 COLUMNS = ("app", "package", "risk", "why", "installed", "source", "status")
 HEADINGS = ("App name", "Package", "Risk", "Why flagged", "Installed", "Source", "Status")
 SUSPICIOUS = {"HIGH", "Medium"}
@@ -87,8 +101,8 @@ class AdCleanerApp:
     def __init__(self, root):
         self.root = root
         root.title("Ad Cleaner")
-        root.geometry("1000x700")
-        root.minsize(820, 560)
+        root.geometry("1080x740")
+        root.minsize(900, 600)
 
         self.adb = None
         self.serial = None
@@ -129,133 +143,206 @@ class AdCleanerApp:
     def _run_bg(self, fn):
         threading.Thread(target=fn, daemon=True).start()
 
+    # --- theme + buttons ----------------------------------------------------
+
+    def _apply_theme(self):
+        self._btn_palette = {}
+        self.root.configure(bg=BASE)
+        st = ttk.Style()
+        try:
+            st.theme_use("clam")
+        except tk.TclError:
+            pass
+        st.configure(".", font=(FONT, 10), background=BASE, foreground=INK)
+        st.configure("TFrame", background=BASE)
+        st.configure("TLabel", background=BASE, foreground=INK)
+        st.configure("Muted.TLabel", background=BASE, foreground=MUTED)
+        st.configure("Status.TLabel", background=PANEL, foreground=MUTED)
+        st.configure("Header.TFrame", background=HEADER_BG)
+        st.configure("Header.TLabel", background=HEADER_BG, foreground=HEADER_INK,
+                     font=(FONT, 11, "bold"))
+        st.configure("HeaderMuted.TLabel", background=HEADER_BG, foreground=HEADER_MUTED,
+                     font=(FONT, 10))
+        st.configure("Panel.TFrame", background=PANEL, borderwidth=1, relief="solid")
+        st.configure("PanelFlat.TFrame", background=PANEL, borderwidth=0)
+        st.configure("Panel.TLabel", background=PANEL, foreground=INK)
+        st.configure("PanelMuted.TLabel", background=PANEL, foreground=MUTED)
+        st.configure("PanelWarn.TLabel", background=PANEL, foreground=RED)
+        st.configure("TCheckbutton", background=BASE)
+        st.map("TCheckbutton", background=[("active", BASE)])
+        st.configure("TButton", font=(FONT, 10), padding=(10, 6))
+        st.configure("Action.TButton", font=(FONT, 10, "bold"), padding=(12, 7))
+        st.configure("TNotebook", background=BASE, borderwidth=0, tabmargins=(6, 6, 6, 0))
+        st.configure("TNotebook.Tab", font=(FONT, 10, "bold"), padding=(18, 8),
+                     background="#e2e8f0", foreground=MUTED)
+        st.map("TNotebook.Tab", background=[("selected", BASE)],
+               foreground=[("selected", INK)])
+        st.configure("Treeview", font=(FONT, 10), rowheight=30, background=BASE,
+                     fieldbackground=BASE, borderwidth=0)
+        st.configure("Treeview.Heading", font=(FONT, 10, "bold"), padding=(6, 6),
+                     background="#e2e8f0", foreground=INK, relief="flat")
+        st.map("Treeview", background=[("selected", "#dbeafe")],
+               foreground=[("selected", INK)])
+        st.configure("TProgressbar", background=GREEN, troughcolor="#e2e8f0")
+
+    def _flat_button(self, parent, text, cmd, bg, hot, font=(FONT, 10, "bold"),
+                     padx=12, pady=6):
+        btn = tk.Button(parent, text=text, command=cmd, bg=bg, fg="white",
+                        activebackground=hot, activeforeground="white", font=font,
+                        relief="flat", bd=0, padx=padx, pady=pady, cursor="hand2",
+                        disabledforeground="#eef2f7")
+        self._btn_palette[btn] = (bg, hot)
+        btn.bind("<Enter>", lambda e: self._btn_hover(btn, True))
+        btn.bind("<Leave>", lambda e: self._btn_hover(btn, False))
+        return btn
+
+    def _btn_hover(self, btn, on):
+        if str(btn["state"]) == "disabled":
+            return
+        normal, hot = self._btn_palette[btn]
+        btn.config(bg=hot if on else normal)
+
+    def _enable_btn(self, btn, on):
+        normal, _ = self._btn_palette[btn]
+        btn.config(state="normal" if on else "disabled", bg=normal if on else BTN_OFF)
+
     # --- UI construction ----------------------------------------------------
 
     def _build_ui(self):
-        top = ttk.Frame(self.root, padding=(10, 8))
-        top.pack(fill="x")
-        self.dot = tk.Canvas(top, width=16, height=16, highlightthickness=0)
-        self.dot.grid(row=0, column=0, padx=(0, 6))
+        self._apply_theme()
+
+        header = ttk.Frame(self.root, style="Header.TFrame", padding=(14, 10))
+        header.pack(fill="x")
+        ttk.Label(header, text="🧹  Ad Cleaner", style="Header.TLabel",
+                  font=(FONT, 13, "bold")).grid(row=0, column=0, padx=(0, 18))
+        self.dot = tk.Canvas(header, width=18, height=18, highlightthickness=0, bg=HEADER_BG)
+        self.dot.grid(row=0, column=1, padx=(0, 6))
         self._draw_dot("grey")
         self.status_var = tk.StringVar(value="Starting…")
-        ttk.Label(top, textvariable=self.status_var, font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=1, sticky="w")
+        ttk.Label(header, textvariable=self.status_var, style="Header.TLabel").grid(
+            row=0, column=2, sticky="w")
         self.model_var = tk.StringVar(value="")
-        ttk.Label(top, textvariable=self.model_var, foreground="#555").grid(
-            row=0, column=2, sticky="w", padx=12)
-        top.columnconfigure(3, weight=1)
-        self.rescan_btn = ttk.Button(top, text="🔄 Rescan", command=self.on_rescan,
-                                     state="disabled")
-        self.rescan_btn.grid(row=0, column=4, padx=6)
-        self.clean_btn = tk.Button(
-            top, text="✨ CLEAN MY PHONE", command=self.on_clean,
-            bg="#2e7d32", fg="white", activebackground="#1b5e20",
-            activeforeground="white", font=("Segoe UI", 12, "bold"),
-            relief="raised", padx=14, pady=7, state="disabled", cursor="hand2")
-        self.clean_btn.grid(row=0, column=5, padx=(0, 8))
-        self.stop_btn = tk.Button(
-            top, text="⏹ STOP ALL", command=self.on_stop_all,
-            bg="#d32f2f", fg="white", activebackground="#b71c1c",
-            activeforeground="white", font=("Segoe UI", 11, "bold"),
-            relief="raised", padx=12, pady=6, state="disabled", cursor="hand2")
-        self.stop_btn.grid(row=0, column=6)
+        ttk.Label(header, textvariable=self.model_var, style="HeaderMuted.TLabel").grid(
+            row=0, column=3, sticky="w", padx=12)
+        header.columnconfigure(4, weight=1)
+        self.rescan_btn = self._flat_button(header, "🔄  Rescan", self.on_rescan,
+                                            SLATE, SLATE_HOT)
+        self.rescan_btn.grid(row=0, column=5, padx=(0, 8))
+        self.clean_btn = self._flat_button(header, "✨  CLEAN MY PHONE", self.on_clean,
+                                           GREEN, GREEN_HOT, font=(FONT, 12, "bold"),
+                                           padx=16, pady=8)
+        self.clean_btn.grid(row=0, column=6, padx=(0, 8))
+        self.stop_btn = self._flat_button(header, "⏹  STOP ALL", self.on_stop_all,
+                                          RED, RED_HOT)
+        self.stop_btn.grid(row=0, column=7)
+        for b in (self.rescan_btn, self.clean_btn, self.stop_btn):
+            self._enable_btn(b, False)
 
         self._build_wizard()
 
         nb = ttk.Notebook(self.root)
-        nb.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+        nb.pack(fill="both", expand=True, padx=10, pady=(6, 2))
         self._build_apps_tab(nb)
         self._build_history_tab(nb)
         self._build_help_tab(nb)
         self.notebook = nb
 
-        self.statusbar = ttk.Label(self.root, text="", relief="sunken", anchor="w",
-                                   padding=(8, 3))
+        self.statusbar = ttk.Label(self.root, text="Ready.", style="Status.TLabel",
+                                   anchor="w", padding=(12, 6))
         self.statusbar.pack(fill="x", side="bottom")
+        ttk.Separator(self.root).pack(fill="x", side="bottom")
 
     def _build_apps_tab(self, nb):
-        tab = ttk.Frame(nb)
+        tab = ttk.Frame(nb, padding=(4, 6))
         nb.add(tab, text="Apps")
 
-        bar = ttk.Frame(tab, padding=(8, 6))
+        bar = ttk.Frame(tab, padding=(6, 6))
         bar.pack(fill="x")
-        ttk.Label(bar, text="Filter:").pack(side="left")
+        ttk.Label(bar, text="🔎").pack(side="left", padx=(2, 4))
         self.filter_var = tk.StringVar()
         self.filter_var.trace_add("write", lambda *_: self._render_table())
-        ttk.Entry(bar, textvariable=self.filter_var, width=28).pack(side="left", padx=6)
+        ttk.Entry(bar, textvariable=self.filter_var, width=30).pack(side="left", padx=4)
         self.suspicious_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bar, text="Show suspicious only", variable=self.suspicious_var,
-                        command=self._render_table).pack(side="left", padx=10)
-        self.progress = ttk.Progressbar(bar, mode="determinate", length=200)
+        ttk.Checkbutton(bar, text="Show risky apps only", variable=self.suspicious_var,
+                        command=self._render_table).pack(side="left", padx=12)
+        self.progress = ttk.Progressbar(bar, mode="determinate", length=220)
 
         mid = ttk.Frame(tab)
-        mid.pack(fill="both", expand=True, padx=8)
+        mid.pack(fill="both", expand=True, padx=6)
         self.tree = ttk.Treeview(mid, columns=COLUMNS, show="headings", selectmode="browse")
-        widths = (200, 230, 70, 240, 90, 150, 80)
+        widths = (210, 230, 88, 250, 96, 150, 84)
         for col, head, w in zip(COLUMNS, HEADINGS, widths):
             self.tree.heading(col, text=head)
             self.tree.column(col, width=w, anchor="w")
-        for risk, bg in RISK_BG.items():
-            self.tree.tag_configure(risk, background=bg)
+        for risk in RISK_BG:
+            self.tree.tag_configure(risk, background=RISK_BG[risk], foreground=RISK_FG[risk])
         vsb = ttk.Scrollbar(mid, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        detail = ttk.LabelFrame(tab, text="Details", padding=8)
-        detail.pack(fill="x", padx=8, pady=6)
+        detail = ttk.Frame(tab, style="Panel.TFrame", padding=14)
+        detail.pack(fill="x", padx=6, pady=(8, 2))
+        ttk.Label(detail, text="DETAILS", style="PanelMuted.TLabel",
+                  font=(FONT, 8, "bold")).pack(anchor="w")
         self.detail_title = ttk.Label(detail, text="Select an app to see details.",
-                                      font=("Segoe UI", 10, "bold"))
-        self.detail_title.pack(anchor="w")
-        self.detail_reasons = ttk.Label(detail, text="", justify="left", wraplength=940)
-        self.detail_reasons.pack(anchor="w", pady=(2, 6))
-        btns = ttk.Frame(detail)
+                                      style="Panel.TLabel", font=(FONT, 12, "bold"))
+        self.detail_title.pack(anchor="w", pady=(2, 0))
+        self.detail_reasons = ttk.Label(detail, text="", style="Panel.TLabel",
+                                        justify="left", wraplength=940)
+        self.detail_reasons.pack(anchor="w", pady=(3, 10))
+        btns = ttk.Frame(detail, style="PanelFlat.TFrame")
         btns.pack(anchor="w")
-        self.pause_btn = ttk.Button(btns, text="⏸ Pause", command=self.on_pause,
-                                    state="disabled")
-        self.resume_btn = ttk.Button(btns, text="▶ Resume", command=self.on_resume,
-                                     state="disabled")
-        self.uninstall_btn = ttk.Button(btns, text="🗑 Uninstall", command=self.on_uninstall,
-                                        state="disabled")
+        self.pause_btn = self._flat_button(btns, "⏸  Pause", self.on_pause,
+                                           "#d97706", "#b45309")
+        self.resume_btn = self._flat_button(btns, "▶  Resume", self.on_resume,
+                                            SLATE, SLATE_HOT)
+        self.uninstall_btn = self._flat_button(btns, "🗑  Uninstall", self.on_uninstall,
+                                               RED, RED_HOT)
         for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
             b.pack(side="left", padx=(0, 8))
+            self._enable_btn(b, False)
 
     def _build_history_tab(self, nb):
-        tab = ttk.Frame(nb)
+        tab = ttk.Frame(nb, padding=(4, 6))
         nb.add(tab, text="History / Undo")
+        wrap = ttk.Frame(tab)
+        wrap.pack(fill="both", expand=True, padx=6, pady=6)
         cols = ("time", "package", "action", "result")
-        self.hist = ttk.Treeview(tab, columns=cols, show="headings", selectmode="browse")
-        for c, w in zip(cols, (150, 300, 120, 90)):
+        self.hist = ttk.Treeview(wrap, columns=cols, show="headings", selectmode="browse")
+        for c, w in zip(cols, (160, 300, 130, 90)):
             self.hist.heading(c, text=c.title())
             self.hist.column(c, width=w, anchor="w")
-        self.hist.pack(fill="both", expand=True, padx=8, pady=8, side="left")
-        vsb = ttk.Scrollbar(tab, orient="vertical", command=self.hist.yview)
+        self.hist.pack(side="left", fill="both", expand=True)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.hist.yview)
         self.hist.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
-        self.undo_btn = ttk.Button(tab, text="↩ Undo selected", command=self.on_undo)
-        self.undo_btn.pack(side="bottom", pady=6)
+        self.undo_btn = self._flat_button(tab, "↩  Undo selected", self.on_undo,
+                                          SLATE, SLATE_HOT)
+        self._enable_btn(self.undo_btn, True)  # always allowed to try; validates on click
+        self.undo_btn.pack(side="bottom", pady=8)
         self._refresh_history()
 
     def _build_help_tab(self, nb):
         tab = ttk.Frame(nb)
         nb.add(tab, text="Help")
-        txt = tk.Text(tab, wrap="word", padx=14, pady=12, font=("Segoe UI", 10),
-                      relief="flat")
+        txt = tk.Text(tab, wrap="word", padx=18, pady=16, font=(FONT, 10), relief="flat",
+                      bg=BASE, fg=INK, highlightthickness=0, borderwidth=0)
         txt.insert("1.0", HELP_TEXT)
         txt.configure(state="disabled")
-        txt.pack(fill="both", expand=True, padx=8, pady=8)
+        txt.pack(fill="both", expand=True, padx=6, pady=6)
 
     # --- connect wizard (shown until the phone is connected) ----------------
 
     def _build_wizard(self):
-        self.wizard = ttk.Frame(self.root, padding=(16, 10))
-        self.wizard.pack(fill="x")
-        ttk.Label(self.wizard, text="Let's connect your phone",
-                  font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        self.wizard = ttk.Frame(self.root, style="Panel.TFrame", padding=(20, 16))
+        self.wizard.pack(fill="x", padx=10, pady=(8, 2))
+        ttk.Label(self.wizard, text="📱  Let's connect your phone", style="Panel.TLabel",
+                  font=(FONT, 15, "bold")).pack(anchor="w")
         self.wiz_status = tk.StringVar(value="Looking for your phone…")
-        ttk.Label(self.wizard, textvariable=self.wiz_status, font=("Segoe UI", 12),
-                  foreground="#c62828").pack(anchor="w", pady=(2, 10))
+        ttk.Label(self.wizard, textvariable=self.wiz_status, style="PanelWarn.TLabel",
+                  font=(FONT, 12, "bold")).pack(anchor="w", pady=(3, 12))
 
         steps = [
             "Turn on “USB debugging” on the phone",
@@ -264,24 +351,25 @@ class AdCleanerApp:
         ]
         self.step_icons = []
         for i, text in enumerate(steps):
-            row = ttk.Frame(self.wizard)
-            row.pack(fill="x", pady=2)
-            icon = ttk.Label(row, text="⬜", font=("Segoe UI", 13), width=2)
-            icon.pack(side="left", padx=(0, 8))
+            row = ttk.Frame(self.wizard, style="PanelFlat.TFrame")
+            row.pack(fill="x", pady=3)
+            icon = ttk.Label(row, text="⬜", style="Panel.TLabel", font=(FONT, 14), width=2)
+            icon.pack(side="left", padx=(0, 10))
             self.step_icons.append(icon)
-            ttk.Label(row, text=text, font=("Segoe UI", 11)).pack(side="left")
+            ttk.Label(row, text=text, style="Panel.TLabel", font=(FONT, 11)).pack(side="left")
             if i == 0:
-                brow = ttk.Frame(self.wizard)
-                brow.pack(fill="x", padx=34, pady=(2, 0))
-                ttk.Label(brow, text="Which phone?").pack(side="left", padx=(0, 6))
+                brow = ttk.Frame(self.wizard, style="PanelFlat.TFrame")
+                brow.pack(fill="x", padx=36, pady=(2, 0))
+                ttk.Label(brow, text="Which phone?", style="PanelMuted.TLabel").pack(
+                    side="left", padx=(0, 8))
                 self.brand_var = tk.StringVar(value="Other / not sure")
                 ttk.OptionMenu(brow, self.brand_var, "Other / not sure",
                                *BRAND_STEPS, command=lambda *_: self._show_brand()).pack(
                     side="left")
                 self.brand_help = ttk.Label(
                     self.wizard, text=BRAND_STEPS["Other / not sure"], wraplength=900,
-                    justify="left", foreground="#555")
-                self.brand_help.pack(anchor="w", padx=34, pady=(2, 8))
+                    justify="left", style="PanelMuted.TLabel")
+                self.brand_help.pack(anchor="w", padx=36, pady=(3, 6))
         self._set_wizard_state("searching")
 
     def _show_brand(self):
@@ -297,7 +385,7 @@ class AdCleanerApp:
                 self.wizard.pack_forget()
             return
         if not self.wizard.winfo_manager():
-            self.wizard.pack(fill="x", before=self.notebook)
+            self.wizard.pack(fill="x", padx=10, pady=(8, 2), before=self.notebook)
         if state == "unauthorized":
             self.wiz_status.set("Almost there!  Now tap “Allow” on the phone screen.")
             self._mark_steps(current=2, done=2)
@@ -307,7 +395,7 @@ class AdCleanerApp:
 
     def _draw_dot(self, color):
         self.dot.delete("all")
-        self.dot.create_oval(2, 2, 14, 14, fill=DOT[color], outline="")
+        self.dot.create_oval(3, 3, 16, 16, fill=DOT[color], outline="")
 
     # --- connection ---------------------------------------------------------
 
@@ -386,10 +474,10 @@ class AdCleanerApp:
         unauth = [d for d in devices if d["state"] == "unauthorized"]
 
         if not devices:
-            self._disconnect("No phone detected — plug in your phone (see Help).", "grey")
+            self._disconnect("No phone connected", "grey")
             self._set_wizard_state("searching")
         elif unauth and not ready:
-            self._disconnect("Phone found — tap 'Allow' on the phone to continue.", "orange")
+            self._disconnect("Tap “Allow” on the phone", "orange")
             self._set_wizard_state("unauthorized")
         elif ready:
             serial = self._pick_serial(ready)
@@ -442,9 +530,9 @@ class AdCleanerApp:
         self._set_wizard_state("connected")
         extra = f"Android {android}" if android else ""
         self.model_var.set(f"{model}   {extra}".strip())
-        self.rescan_btn.config(state="normal")
-        self.clean_btn.config(state="normal")
-        self.stop_btn.config(state="normal")
+        self._enable_btn(self.rescan_btn, True)
+        self._enable_btn(self.clean_btn, True)
+        self._enable_btn(self.stop_btn, True)
         self.status_line("Phone connected. Scanning apps…")
         self.on_rescan()
 
@@ -455,9 +543,9 @@ class AdCleanerApp:
             self.adb = Adb(self.adb.adb_path)  # drop the -s binding
         self._set_status(color, message)
         self.model_var.set("")
-        self.rescan_btn.config(state="disabled")
-        self.clean_btn.config(state="disabled")
-        self.stop_btn.config(state="disabled")
+        self._enable_btn(self.rescan_btn, False)
+        self._enable_btn(self.clean_btn, False)
+        self._enable_btn(self.stop_btn, False)
         if was:
             self.status_line("Phone disconnected.")
             self.apps = []
@@ -470,7 +558,7 @@ class AdCleanerApp:
         if self.busy or not self.serial:
             return
         self.busy = True
-        self.rescan_btn.config(state="disabled")
+        self._enable_btn(self.rescan_btn, False)
         self.progress.pack(side="right", padx=8)
         self.progress.config(value=0, maximum=100)
         self.status_line("Scanning…")
@@ -494,7 +582,7 @@ class AdCleanerApp:
         self.busy = False
         self.progress.pack_forget()
         if self.serial:
-            self.rescan_btn.config(state="normal")
+            self._enable_btn(self.rescan_btn, True)
         has_high = any(a.risk == "HIGH" for a in apps)
         self.suspicious_var.set(has_high)
         self._render_table()
@@ -508,7 +596,7 @@ class AdCleanerApp:
         self.busy = False
         self.progress.pack_forget()
         if self.serial:
-            self.rescan_btn.config(state="normal")
+            self._enable_btn(self.rescan_btn, True)
         self.status_line("Scan failed: " + err)
 
     # --- table + detail -----------------------------------------------------
@@ -529,8 +617,9 @@ class AdCleanerApp:
         for a in self._visible_apps():
             installed = a.first_install.strftime("%Y-%m-%d") if a.first_install else ""
             why = ", ".join(a.reasons)
+            name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
             self.tree.insert("", "end", iid=a.package, tags=(a.risk,),
-                             values=(a.label.split(" (")[0], a.package, a.risk, why,
+                             values=(name, a.package, a.risk, why,
                                      installed, a.source, a.status))
 
     def _app_by_pkg(self, pkg):
@@ -546,7 +635,7 @@ class AdCleanerApp:
         self.detail_title.config(text="Select an app to see details.")
         self.detail_reasons.config(text="")
         for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
-            b.config(state="disabled")
+            self._enable_btn(b, False)
 
     def _update_detail(self):
         a = self.selected
@@ -558,13 +647,13 @@ class AdCleanerApp:
             self.detail_reasons.config(text="🔒 Protected system app — this one is kept safe "
                                             "and cannot be changed.")
             for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
-                b.config(state="disabled")
+                self._enable_btn(b, False)
             return
         reasons = "\n".join("• " + r for r in a.reasons) or "Nothing suspicious found."
         self.detail_reasons.config(text=reasons)
-        self.pause_btn.config(state="normal" if a.enabled else "disabled")
-        self.resume_btn.config(state="disabled" if a.enabled else "normal")
-        self.uninstall_btn.config(state="normal")
+        self._enable_btn(self.pause_btn, a.enabled)
+        self._enable_btn(self.resume_btn, not a.enabled)
+        self._enable_btn(self.uninstall_btn, True)
 
     # --- actions ------------------------------------------------------------
 

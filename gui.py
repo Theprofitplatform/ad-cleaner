@@ -800,7 +800,7 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, False)
         self._enable_btn(self.clean_btn, False)
         self._enable_btn(self.stop_btn, False)
-        for b in self.dev_btns:
+        for b in self.dev_btns + self.dns_btns:
             self._enable_btn(b, False)
         self._enable_btn(self.crash_btn, False)
         for v in self.dev_vars.values():

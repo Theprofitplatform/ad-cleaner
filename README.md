@@ -72,6 +72,7 @@ individual apps), then restart the phone normally.
 | **⏸ Pause** | Freezes one app so it can't run. Fully reversible with **Resume**. |
 | **▶ Resume** | Un-freezes a paused app. |
 | **🗑 Uninstall** | Removes an app for you. Restore it later from the **History** tab. |
+| **🛡️ Block ads (Private DNS)** | On the Device tab. Sends the phone's DNS through an ad-blocking resolver so ads are blocked in **every** app, even ones you keep. Reversible with **Turn off**. |
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.
 
@@ -80,6 +81,10 @@ Anything marked with a 🔒 padlock is a protected system app and can't be chang
 Every change is recorded on the **History / Undo** tab. Select any entry and
 click **Undo** to reverse it (re-enable an app, restore a pop-up permission, or
 re-install something you removed).
+
+After a clean, Ad Cleaner saves a **printable receipt** (in `adcleaner_data/reports/`)
+listing what it closed, blocked and removed — handy when cleaning someone else's
+phone. The **Export report** button saves the full history the same way.
 
 ---
 

@@ -4,9 +4,9 @@ import pytest
 
 import actions
 from actions import (
-    ActionLog, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
-    disable_accessibility, pause, reboot, reset_app_data, resume, stop_all, undo,
-    uninstall,
+    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
+    clear_private_dns, disable_accessibility, pause, read_private_dns, reboot, reset_app_data,
+    resume, set_private_dns, stop_all, undo, uninstall,
 )
 from scanner import App
 
@@ -22,6 +22,7 @@ class FakeAdb:
         self.pulled = []
         self.rebooted = False
         self.calls = []
+        self.globals = {}
 
     def pull(self, remote, local, timeout=120):
         self.pulled.append((remote, local))
@@ -66,6 +67,10 @@ class FakeAdb:
             return "".join(f"package:{p}\n" for p in self.disabled)
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
+        if args[:3] == ["settings", "get", "global"]:
+            return self.globals.get(args[3], "null")
+        if args[:3] == ["settings", "put", "global"]:
+            self.globals[args[3]] = args[4]; return ""
         return ""
 
 
@@ -251,3 +256,33 @@ def test_log_is_appended_and_persisted(tmp_path):
     pause(adb, App(package="com.random.adware", installer=None), log)
     # Re-load from disk: entry persisted.
     assert ActionLog(path).entries[0]["package"] == "com.random.adware"
+
+
+def test_read_private_dns_defaults_to_off(log):
+    adb = FakeAdb()
+    assert read_private_dns(adb) == ("off", "")
+
+
+def test_set_private_dns_writes_verifies_and_logs(log):
+    adb = FakeAdb()
+    host = DNS_PROVIDERS["AdGuard — blocks ads + trackers"]
+    assert set_private_dns(adb, host, log) is True
+    assert adb.globals["private_dns_mode"] == "hostname"
+    assert adb.globals["private_dns_specifier"] == host
+    assert read_private_dns(adb) == ("hostname", host)
+    assert log.entries[-1]["action"] == "set-dns"
+
+
+def test_set_private_dns_rejects_bad_hostname(log):
+    adb = FakeAdb()
+    with pytest.raises(ValueError):
+        set_private_dns(adb, "not a host!", log)
+    assert "private_dns_mode" not in adb.globals   # nothing written
+
+
+def test_clear_private_dns_turns_off(log):
+    adb = FakeAdb()
+    set_private_dns(adb, "dns.adguard.com", log)
+    assert clear_private_dns(adb, log) is True
+    assert read_private_dns(adb)[0] == "off"
+    assert log.entries[-1]["action"] == "clear-dns"

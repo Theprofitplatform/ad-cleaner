@@ -22,6 +22,13 @@ def test_receipt_pause_mode_states_no_space_freed():
     assert "Paused" in out
 
 
+def test_receipt_uninstall_mode_zero_freed_is_not_contradictory():
+    out = render_receipt_html({**RECEIPT, "removed": True, "freed_gb": 0})
+    assert "still installed" not in out
+    assert "paused" not in out.lower()
+    assert "Removed" in out
+
+
 def test_history_escapes_hostile_package_names():
     out = render_history_html(
         [{"time": "t", "package": "<script>x</script>", "action": "pause", "result": "ok"}])

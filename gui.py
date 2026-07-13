@@ -490,6 +490,9 @@ class AdCleanerApp:
         self.dns_status = tk.StringVar(value="—")
         ttk.Label(tab, textvariable=self.dns_status, style="Muted.TLabel").pack(
             anchor="w", pady=(8, 0))
+        ttk.Label(tab, text="Use “Custom” only if you know the DNS address — a wrong one "
+                            "can stop the phone's internet (undo with Turn off).",
+                  style="Muted.TLabel", wraplength=760).pack(anchor="w", pady=(2, 0))
         for b in (self.dns_on_btn, self.dns_off_btn):
             self._enable_btn(b, False)
         self.dns_btns = (self.dns_on_btn, self.dns_off_btn)
@@ -1461,7 +1464,7 @@ class AdCleanerApp:
         def work():
             try:
                 set_private_dns(self.adb, host, self.log)
-                self._post(self._after_dns, None)
+                self._post(self._after_dns, None, "Ad blocking is on.")
             except ValueError as ve:
                 self._post(self._after_dns, str(ve))
             except Exception as e:
@@ -1477,16 +1480,18 @@ class AdCleanerApp:
         def work():
             try:
                 clear_private_dns(self.adb, self.log)
-                self._post(self._after_dns, None)
+                self._post(self._after_dns, None, "Ad blocking is off.")
             except Exception as e:
                 self._post(self._after_dns, self._friendly(str(e)))
 
         self._run_bg(work)
 
-    def _after_dns(self, err):
+    def _after_dns(self, err, ok_msg=None):
         self._refresh_history()
         if err:
             self.status_line("Couldn't change ad blocking. " + err, "error")
+        elif ok_msg:
+            self.status_line(ok_msg, "good")
         self._refresh_dns()
 
     def _refresh_dns(self):

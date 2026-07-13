@@ -27,9 +27,13 @@ def render_receipt_html(receipt):
     r = receipt
     verb = "Removed" if r.get("removed") else "Paused"
     freed = r.get("freed_gb") or 0
-    freed_line = (f"<p><b>Space freed:</b> {freed} GB</p>" if freed > 0
-                  else "<p class='muted'>Apps were paused (still installed) — "
-                       "no space freed.</p>")
+    if freed > 0:
+        freed_line = f"<p><b>Space freed:</b> {freed} GB</p>"
+    elif r.get("removed"):
+        freed_line = "<p class='muted'>No measurable change in free space.</p>"
+    else:
+        freed_line = ("<p class='muted'>Apps were paused (still installed) — "
+                      "no space freed.</p>")
     pkgs = r.get("packages") or []
     pkg_block = ""
     if pkgs:
@@ -71,6 +75,8 @@ def demo():
     out = render_receipt_html(r)
     assert "1.2 GB" in out and "com.random.adware" in out and "Removed" in out
     assert "no space freed" in render_receipt_html({**r, "removed": False, "freed_gb": 0}).lower()
+    removed0 = render_receipt_html({**r, "removed": True, "freed_gb": 0})
+    assert "still installed" not in removed0 and "No measurable change" in removed0
     hist = render_history_html([{"time": "t", "package": "<b>x", "action": "pause", "result": "ok"}])
     assert "<b>x" not in hist and "&lt;b&gt;x" in hist
     print("report.py demo OK")

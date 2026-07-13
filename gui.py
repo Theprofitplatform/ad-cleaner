@@ -15,8 +15,9 @@ from tkinter import messagebox, ttk
 
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
-    ActionLog, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
-    pause, reboot, reset_app_data, resume, stop_all, undo, uninstall,
+    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky,
+    clear_caches, clear_private_dns, pause, read_private_dns, reboot, reset_app_data,
+    resume, set_private_dns, stop_all, undo, uninstall,
 )
 from crashes import read_crash_report, summarize
 from device import read_device_stats
@@ -462,6 +463,36 @@ class AdCleanerApp:
                             "It never deletes your photos, messages or accounts.",
                   style="Muted.TLabel", wraplength=760).pack(anchor="w", pady=(12, 0))
 
+        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(18, 12))
+        ttk.Label(tab, text="🛡️  Block ads system-wide (Private DNS)",
+                  font=(FONT, 12, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Blocks ads and trackers in every app — even ones you keep. "
+                            "Reversible any time; never touches photos, messages or accounts.",
+                  style="Muted.TLabel", wraplength=760).pack(anchor="w", pady=(2, 8))
+
+        dns_row = ttk.Frame(tab)
+        dns_row.pack(anchor="w")
+        self.dns_provider = tk.StringVar(value=list(DNS_PROVIDERS)[0])
+        choices = list(DNS_PROVIDERS) + ["Custom…"]
+        self.dns_combo = ttk.Combobox(dns_row, textvariable=self.dns_provider,
+                                      values=choices, state="readonly", width=34)
+        self.dns_combo.pack(side="left", padx=(0, 8))
+        self.dns_combo.bind("<<ComboboxSelected>>", lambda *_: self._sync_dns_custom())
+        self.dns_custom = ttk.Entry(dns_row, width=24)
+        self.dns_custom.pack(side="left", padx=(0, 8))
+        self.dns_on_btn = self._flat_button(dns_row, "Turn on", self.on_dns_on, GREEN, GREEN_HOT)
+        self.dns_on_btn.pack(side="left", padx=(0, 6))
+        self.dns_off_btn = self._flat_button(dns_row, "Turn off", self.on_dns_off, SLATE, SLATE_HOT)
+        self.dns_off_btn.pack(side="left")
+
+        self.dns_status = tk.StringVar(value="—")
+        ttk.Label(tab, textvariable=self.dns_status, style="Muted.TLabel").pack(
+            anchor="w", pady=(8, 0))
+        for b in (self.dns_on_btn, self.dns_off_btn):
+            self._enable_btn(b, False)
+        self.dns_btns = (self.dns_on_btn, self.dns_off_btn)
+        self._sync_dns_custom()
+
     def _build_crashes_tab(self, nb):
         tab = ttk.Frame(nb, padding=18)
         nb.add(tab, text="Crashes")
@@ -751,10 +782,11 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, True)
         self._enable_btn(self.clean_btn, True)
         self._enable_btn(self.stop_btn, True)
-        for b in self.dev_btns:
+        for b in self.dev_btns + self.dns_btns:
             self._enable_btn(b, True)
         self._enable_btn(self.crash_btn, True)
         self._refresh_device()
+        self._refresh_dns()
         self.status_line("Phone connected. Scanning apps…")
         self.on_rescan()
 
@@ -1353,6 +1385,80 @@ class AdCleanerApp:
             self.status_line("Rebooting the phone…", "good")
         except Exception as e:
             self.status_line("Couldn't reboot. " + self._friendly(str(e)), "error")
+
+    # --- Private DNS (system-wide ad blocking) -------------------------------
+
+    def _sync_dns_custom(self):
+        """Enable the custom-hostname box only when 'Custom…' is chosen."""
+        custom = self.dns_provider.get() == "Custom…"
+        self.dns_custom.configure(state="normal" if custom else "disabled")
+
+    def _dns_hostname(self):
+        """Resolve the chosen provider/custom entry to a hostname string."""
+        label = self.dns_provider.get()
+        if label == "Custom…":
+            return self.dns_custom.get().strip()
+        return DNS_PROVIDERS.get(label, "")
+
+    def on_dns_on(self):
+        if self.busy or not self.serial:
+            return
+        host = self._dns_hostname()
+        if not host:
+            messagebox.showinfo("Block ads", "Type a DNS address for the Custom option.")
+            return
+        self.status_line("Turning on ad blocking…")
+
+        def work():
+            try:
+                set_private_dns(self.adb, host, self.log)
+                self._post(self._after_dns, None)
+            except ValueError as ve:
+                self._post(self._after_dns, str(ve))
+            except Exception as e:
+                self._post(self._after_dns, self._friendly(str(e)))
+
+        self._run_bg(work)
+
+    def on_dns_off(self):
+        if self.busy or not self.serial:
+            return
+        self.status_line("Turning off ad blocking…")
+
+        def work():
+            try:
+                clear_private_dns(self.adb, self.log)
+                self._post(self._after_dns, None)
+            except Exception as e:
+                self._post(self._after_dns, self._friendly(str(e)))
+
+        self._run_bg(work)
+
+    def _after_dns(self, err):
+        self._refresh_history()
+        if err:
+            self.status_line("Couldn't change ad blocking. " + err, "error")
+        self._refresh_dns()
+
+    def _refresh_dns(self):
+        if not self.serial:
+            return
+
+        def work():
+            try:
+                mode, host = read_private_dns(self.adb)
+                self._post(self._show_dns, mode, host)
+            except Exception:
+                pass
+
+        self._run_bg(work)
+
+    def _show_dns(self, mode, host):
+        if mode == "hostname" and host:
+            label = next((k for k, v in DNS_PROVIDERS.items() if v == host), host)
+            self.dns_status.set(f"On — {label}")
+        else:
+            self.dns_status.set("Off")
 
     # --- STOP ALL -----------------------------------------------------------
 

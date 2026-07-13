@@ -5,16 +5,18 @@ Tk main thread through a queue (Tkinter is not thread-safe). The UI never
 freezes and never crashes on an ADB failure -- errors land in the status bar.
 """
 
+import csv
 import json
 import queue
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox, ttk
 
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
-    ActionLog, ProtectedAppError, can_undo, clean_risky, clear_caches, pause, resume,
-    stop_all, undo, uninstall,
+    ActionLog, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
+    pause, reboot, reset_app_data, resume, stop_all, undo, uninstall,
 )
 from device import read_device_stats
 from scanner import build_inventory
@@ -274,8 +276,9 @@ class AdCleanerApp:
         self.stop_btn.grid(row=0, column=7)
         for b in (self.rescan_btn, self.clean_btn, self.stop_btn):
             self._enable_btn(b, False)
-        # Make CLEAN say what it will actually do (pause vs. permanently remove).
-        self.uninstall_mode.trace_add("write", lambda *_: self._sync_clean_label())
+        # Make CLEAN + the verdict banner say what they'll actually do (pause vs. remove).
+        self.uninstall_mode.trace_add(
+            "write", lambda *_: (self._sync_clean_label(), self._show_summary(self.apps)))
         self._sync_clean_label()
 
         self._build_wizard()
@@ -324,7 +327,7 @@ class AdCleanerApp:
         # displaycolumns puts plain-English columns first (name, risk, why); the
         # techie App ID / Source trail behind so a nervous user reads meaning first.
         self.tree = ttk.Treeview(mid, columns=COLUMNS, displaycolumns=DISPLAY,
-                                 show="headings", selectmode="browse")
+                                 show="headings", selectmode="extended")
         widths = (190, 150, 112, 240, 92, 120, 84)  # COLUMNS order; 'why' flexes
         for col, head, w in zip(COLUMNS, HEADINGS, widths):
             self.tree.heading(col, text=head)
@@ -342,6 +345,18 @@ class AdCleanerApp:
         mid.rowconfigure(0, weight=1)
         mid.columnconfigure(0, weight=1)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<Delete>", lambda e: self.on_uninstall())
+        self.tree.bind("<Button-3>", self._popup_menu)
+        self._row_menu = tk.Menu(self.tree, tearoff=0)
+        for lbl, cmd in (("⏸  Pause", self.on_pause), ("▶  Resume", self.on_resume),
+                         ("🗑  Uninstall", self.on_uninstall), (None, None),
+                         ("↺  Reset data", self.on_reset_data),
+                         ("💾  Backup APK", self.on_backup_apk),
+                         ("📋  Copy app ID", self._copy_pkg)):
+            if lbl is None:
+                self._row_menu.add_separator()
+            else:
+                self._row_menu.add_command(label=lbl, command=cmd)
 
         detail = ttk.Frame(tab, style="Panel.TFrame", padding=14)
         detail.pack(fill="x", padx=6, pady=(8, 2))
@@ -361,7 +376,13 @@ class AdCleanerApp:
                                             SLATE, SLATE_HOT)
         self.uninstall_btn = self._flat_button(btns, "🗑  Uninstall", self.on_uninstall,
                                                RED, RED_HOT)
-        for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
+        self.reset_btn = self._flat_button(btns, "↺  Reset data", self.on_reset_data,
+                                           SLATE, SLATE_HOT)
+        self.backup_btn = self._flat_button(btns, "💾  Backup APK", self.on_backup_apk,
+                                            SLATE, SLATE_HOT)
+        self.detail_btns = (self.pause_btn, self.resume_btn, self.uninstall_btn,
+                            self.reset_btn, self.backup_btn)
+        for b in self.detail_btns:
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
 
@@ -384,10 +405,16 @@ class AdCleanerApp:
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.hist.yview)
         self.hist.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
-        self.undo_btn = self._flat_button(tab, "↩  Undo selected", self.on_undo,
+        row = ttk.Frame(tab)
+        row.pack(side="bottom", pady=8)
+        self.undo_btn = self._flat_button(row, "↩  Undo selected", self.on_undo,
                                           SLATE, SLATE_HOT)
-        self._enable_btn(self.undo_btn, True)  # always allowed to try; validates on click
-        self.undo_btn.pack(side="bottom", pady=8)
+        self.undo_btn.pack(side="left", padx=6)
+        self.export_btn = self._flat_button(row, "📄  Export report", self.on_export,
+                                            SLATE, SLATE_HOT)
+        self.export_btn.pack(side="left", padx=6)
+        for b in (self.undo_btn, self.export_btn):
+            self._enable_btn(b, True)  # validate on click
         self._refresh_history()
 
     def _build_device_tab(self, nb):
@@ -418,8 +445,16 @@ class AdCleanerApp:
         self.dev_refresh_btn.pack(side="left", padx=(0, 8))
         self.cache_btn = self._flat_button(btns, "🧹  Clear app caches",
                                            self.on_clear_caches, GREEN, GREEN_HOT)
-        self.cache_btn.pack(side="left")
-        for b in (self.dev_refresh_btn, self.cache_btn):
+        self.cache_btn.pack(side="left", padx=(0, 8))
+        self.shot_btn = self._flat_button(btns, "📷  Screenshot",
+                                          self.on_screenshot, SLATE, SLATE_HOT)
+        self.shot_btn.pack(side="left", padx=(0, 8))
+        self.reboot_btn = self._flat_button(btns, "🔌  Reboot phone",
+                                            self.on_reboot, SLATE, SLATE_HOT)
+        self.reboot_btn.pack(side="left")
+        self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
+                         self.reboot_btn)
+        for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
                             "It never deletes your photos, messages or accounts.",
@@ -639,8 +674,8 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, True)
         self._enable_btn(self.clean_btn, True)
         self._enable_btn(self.stop_btn, True)
-        self._enable_btn(self.dev_refresh_btn, True)
-        self._enable_btn(self.cache_btn, True)
+        for b in self.dev_btns:
+            self._enable_btn(b, True)
         self._refresh_device()
         self.status_line("Phone connected. Scanning apps…")
         self.on_rescan()
@@ -655,8 +690,8 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, False)
         self._enable_btn(self.clean_btn, False)
         self._enable_btn(self.stop_btn, False)
-        self._enable_btn(self.dev_refresh_btn, False)
-        self._enable_btn(self.cache_btn, False)
+        for b in self.dev_btns:
+            self._enable_btn(b, False)
         for v in self.dev_vars.values():
             v.set("—")
         if was:
@@ -799,7 +834,7 @@ class AdCleanerApp:
         self.selected = None
         self.detail_title.config(text="Select an app to see details.")
         self.detail_reasons.config(text="")
-        for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
+        for b in self.detail_btns:
             self._enable_btn(b, False)
 
     def _update_detail(self):
@@ -811,7 +846,7 @@ class AdCleanerApp:
         if a.protected:
             self.detail_reasons.config(text="🔒 Protected system app — this one is kept safe "
                                             "and cannot be changed.")
-            for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
+            for b in self.detail_btns:
                 self._enable_btn(b, False)
             return
         lines = ["• " + r for r in a.reasons] or ["Nothing suspicious found."]
@@ -822,6 +857,8 @@ class AdCleanerApp:
         self._enable_btn(self.pause_btn, a.enabled)
         self._enable_btn(self.resume_btn, not a.enabled)
         self._enable_btn(self.uninstall_btn, True)
+        self._enable_btn(self.reset_btn, True)
+        self._enable_btn(self.backup_btn, True)
 
     # --- actions ------------------------------------------------------------
 
@@ -836,34 +873,136 @@ class AdCleanerApp:
             return None
         return a
 
+    def _actionable_selection(self):
+        """Non-protected apps currently selected in the table (multi-select aware)."""
+        if not self.serial or self.busy:
+            return []
+        ids = self.tree.selection()
+        apps = ([self._app_by_pkg(i) for i in ids] if ids
+                else ([self.selected] if self.selected else []))
+        apps = [a for a in apps if a]
+        actionable = [a for a in apps if not a.protected]
+        if apps and not actionable:
+            messagebox.showinfo("Protected app",
+                                "Protected system apps are kept safe and can't be changed.")
+        return actionable
+
+    def _confirm_bulk(self, verb, apps, note):
+        names = "\n".join("     •  " + a.label.split(" (")[0] for a in apps[:10])
+        if len(apps) > 10:
+            names += f"\n     •  …and {len(apps) - 10} more"
+        return messagebox.askyesno(
+            f"{verb} {len(apps)} app(s)",
+            f"{verb} these {len(apps)} app(s)?\n\n{names}\n\n{note}", default="no")
+
     def on_pause(self):
-        a = self._guarded()
-        if not a:
+        apps = [a for a in self._actionable_selection() if a.enabled]
+        if not apps:
             return
-        if not messagebox.askyesno("Pause app", f"Freeze \"{a.label}\"?\n\n"
-                                   "It stops running until you press Resume.",
-                                   default="no"):
+        if not self._confirm_bulk("Pause", apps,
+                                  "They stop running until you press Resume."):
             return
-        self._do_action(lambda: pause(self.adb, a, self.log), a, "Paused")
+        self._do_bulk(lambda a: pause(self.adb, a, self.log), apps, "Paused")
 
     def on_resume(self):
-        a = self.selected
-        if not a or not self.serial or self.busy:
-            return
-        self._do_action(lambda: resume(self.adb, a, self.log), a, "Resumed")
+        apps = [a for a in self._actionable_selection() if not a.enabled]
+        if apps:
+            self._do_bulk(lambda a: resume(self.adb, a, self.log), apps, "Resumed")
 
     def on_uninstall(self):
+        apps = self._actionable_selection()
+        if not apps:
+            return
+        if not self._confirm_bulk("Uninstall", apps,
+                                  "Removed apps can be restored from the History tab."):
+            return
+        self._do_bulk(lambda a: uninstall(self.adb, a, self.log), apps, "Uninstalled",
+                      removes=True)
+
+    def on_reset_data(self):
         a = self._guarded()
         if not a:
             return
         if not messagebox.askyesno(
-                "Uninstall app",
-                f"Remove \"{a.label}\" from the phone?\n\n"
-                "It is removed for you but can be restored later from the History tab.",
-                default="no"):
+                "Reset app data",
+                f"Erase all saved data for \"{a.label}\"?\n\n"
+                "Fixes a hijacked browser or home screen without uninstalling — the app "
+                "stays installed but is reset to fresh.", default="no"):
             return
-        self._do_action(lambda: uninstall(self.adb, a, self.log), a, "Uninstalled",
-                        removes=True)
+        self._do_action(lambda: reset_app_data(self.adb, a, self.log), a, "Reset")
+
+    def on_backup_apk(self):
+        a = self.selected
+        if not a or not self.serial or self.busy:
+            return
+        dest = data_dir() / "apk_backups"
+        self.busy = True
+        self.status_line(f"Backing up {a.label.split(' (')[0]}…")
+
+        def work():
+            try:
+                saved = backup_apk(self.adb, a, dest)
+                self._post(self._backup_done, len(saved), str(dest), None)
+            except Exception as e:
+                self._post(self._backup_done, 0, "", str(e))
+
+        self._run_bg(work)
+
+    def _backup_done(self, n, dest, err):
+        self.busy = False
+        if err:
+            self.status_line("Backup failed. " + self._friendly(err), "error")
+        else:
+            self.status_line(f"✅ Saved {n} APK file(s) to {dest}", "good")
+
+    def _do_bulk(self, fn, apps, verb, removes=False):
+        self.busy = True
+        total = len(apps)
+
+        def work():
+            done, removed = 0, []
+            for i, a in enumerate(apps, 1):
+                self._post(self.status_line,
+                           f"{verb} {i} of {total}: {a.label.split(' (')[0]}…")
+                try:
+                    if fn(a):
+                        done += 1
+                        if removes:
+                            removed.append(a.package)
+                except Exception:
+                    pass
+            self._post(self._bulk_done, verb, done, total, removed)
+
+        self._run_bg(work)
+
+    def _bulk_done(self, verb, done, total, removed):
+        self.busy = False
+        if removed:
+            gone = set(removed)
+            self.apps = [a for a in self.apps if a.package not in gone]
+            self.selected = None
+        self._refresh_history()
+        self._render_table()
+        self._show_summary(self.apps)
+        self._update_detail()
+        self.status_line(f"{verb} {done} of {total} app(s).",
+                         "good" if done else "error")
+
+    def _copy_pkg(self):
+        if self.selected:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.selected.package)
+            self.status_line(f"Copied {self.selected.package}")
+
+    def _popup_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if row and row not in self.tree.selection():
+            self.tree.selection_set(row)
+        self._on_select()
+        try:
+            self._row_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._row_menu.grab_release()
 
     def _do_action(self, fn, app, verb, removes=False):
         self.busy = True
@@ -1075,6 +1214,67 @@ class AdCleanerApp:
         self.status_line(f"✅ Caches cleared. Freed about {freed} GB." if freed > 0
                          else "✅ Caches cleared.", "good")
 
+    def on_screenshot(self):
+        if self.busy or not self.serial:
+            return
+        self.status_line("Taking a screenshot…")
+
+        def work():
+            try:
+                png = self.adb.screencap()
+                self._post(self._show_screenshot, png, None)
+            except Exception as e:
+                self._post(self._show_screenshot, None, str(e))
+
+        self._run_bg(work)
+
+    def _show_screenshot(self, png, err):
+        if err or not png:
+            self.status_line("Couldn't take a screenshot. " + self._friendly(err or ""),
+                             "error")
+            return
+        # Save a copy for the customer record.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = data_dir() / "screenshots"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{self.serial}_{stamp}.png"
+        try:
+            path.write_bytes(png)
+        except Exception:
+            path = None
+        win = tk.Toplevel(self.root)
+        win.title("Phone screen")
+        win.configure(bg=BASE)
+        try:
+            img = tk.PhotoImage(data=png)
+            while img.height() > 780 or img.width() > 460:  # shrink tall phone shots
+                img = img.subsample(2, 2)
+            lbl = tk.Label(win, image=img, bg=BASE)
+            lbl.image = img  # keep a reference alive
+            lbl.pack(padx=8, pady=8)
+        except tk.TclError:
+            tk.Label(win, text="(Couldn't display this image format.)",
+                     bg=BASE, padx=20, pady=20).pack()
+        if path:
+            ttk.Label(win, text=f"Saved to {path}", style="Muted.TLabel").pack(pady=(0, 8))
+        self.status_line("Screenshot captured." + (f" Saved to {path}" if path else ""),
+                         "good")
+
+    def on_reboot(self):
+        if self.busy or not self.serial:
+            return
+        if not messagebox.askyesno(
+                "Reboot phone",
+                "Restart the phone now?\n\nIt will disconnect and come back in a minute.",
+                default="no"):
+            return
+        try:
+            reboot(self.adb, self.log)
+            self._refresh_history()
+            self.status_line("Rebooting the phone…", "good")
+        except Exception as e:
+            self.status_line("Couldn't reboot. " + self._friendly(str(e)), "error")
+
     # --- STOP ALL -----------------------------------------------------------
 
     def on_stop_all(self):
@@ -1151,6 +1351,26 @@ class AdCleanerApp:
             tags = ("failed",) if e.get("result") == "failed" else ()
             self.hist.insert("", "end", iid=str(i), tags=tags,
                              values=(e["time"], e["package"], label, e["result"]))
+
+    def on_export(self):
+        entries = self.log.recent()
+        if not entries:
+            self.status_line("Nothing to export yet.")
+            return
+        folder = data_dir() / "reports"
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = folder / f"report_{stamp}.csv"
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Time", "Phone", "App", "Action", "Result"])
+                for e in entries:
+                    w.writerow([e.get("time", ""), e.get("serial", ""), e.get("package", ""),
+                                e.get("action", ""), e.get("result", "")])
+            self.status_line(f"✅ Report saved to {path}", "good")
+        except Exception as ex:
+            self.status_line("Couldn't save report. " + self._friendly(str(ex)), "error")
 
     def on_undo(self):
         sel = self.hist.selection()

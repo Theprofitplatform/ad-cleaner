@@ -5,10 +5,14 @@ scan, protection-guard, and the one-click clean — all without a phone.
 Skipped where Tk can't open a display.
 """
 
+import base64
 import time
 from datetime import datetime
 
 import pytest
+
+TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
 
 tkinter = pytest.importorskip("tkinter")
 import gui
@@ -26,6 +30,9 @@ class FakeAdb:
         self.serial = serial
         self.disabled = set()
         self.installed = {"com.random.adware", "com.google.android.gms"}
+        self.calls = []
+        self.rebooted = False
+        self.png = TINY_PNG
 
     def start_server(self):
         pass
@@ -36,12 +43,29 @@ class FakeAdb:
     def get_prop(self, prop, timeout=10):
         return {"ro.product.model": "SM Test", "ro.build.version.release": "13"}.get(prop, "")
 
+    def pull(self, remote, local, timeout=120):
+        from pathlib import Path
+        Path(local).write_text("apk"); return "pulled"
+
+    def reboot(self, timeout=10):
+        self.rebooted = True; return ""
+
+    def screencap(self, timeout=20):
+        return self.png  # a valid tiny PNG
+
     def shell_text(self, args, timeout=10):
+        self.calls.append(args)
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return ""
         if args[:3] == ["pm", "uninstall", "--user"]:
             self.installed.discard(args[-1]); return "Success"
-        if args[:2] in (["am", "force-stop"], ["appops", "set"]):
+        if args[:3] == ["pm", "clear", "--user"]:
+            return "Success"
+        if args[:2] == ["pm", "path"]:
+            return "package:/data/app/x/base.apk\n"
+        if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
+            return ""
+        if args[:2] in (["am", "force-stop"], ["appops", "set"], ["settings", "put"]):
             return ""
         if args == ["pm", "list", "packages", "-d"]:
             return "".join(f"package:{p}\n" for p in self.disabled)
@@ -171,6 +195,51 @@ def test_uninstall_mode_removes_apps(root, monkeypatch, tmp_path):
     assert "com.random.adware" not in app.adb.installed        # uninstalled
     assert "com.google.android.gms" in app.adb.installed       # protected kept
     assert app._app_by_pkg("com.random.adware") is None         # dropped from list
+
+
+def test_bulk_uninstall_multi_select(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    a1 = App(package="com.junk.one", installer=None, risk="HIGH")
+    a2 = App(package="com.junk.two", installer=None, risk="HIGH")
+    app.apps = [a1, a2]
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.adb.installed.update({"com.junk.one", "com.junk.two"})
+    app.tree.selection_set("com.junk.one", "com.junk.two")
+    app._on_select()
+    pump(root, 0.1)
+    app.on_uninstall()          # askyesno patched to Yes -> bulk removes both
+    pump(root, 1.0)
+    assert "com.junk.one" not in app.adb.installed
+    assert "com.junk.two" not in app.adb.installed
+    assert app._app_by_pkg("com.junk.one") is None
+
+
+def test_reset_data_from_detail(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.tree.selection_set("com.random.adware")
+    app._on_select()
+    pump(root, 0.1)
+    app.on_reset_data()
+    pump(root, 0.6)
+    assert ["pm", "clear", "--user", "0", "com.random.adware"] in app.adb.calls
+
+
+def test_screenshot_and_reboot(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.on_screenshot()         # captures TINY_PNG, opens a viewer, saves a file
+    pump(root, 0.6)
+    app.on_reboot()             # askyesno patched to Yes
+    pump(root, 0.3)
+    assert app.adb.rebooted
 
 
 def test_shop_mode_auto_cleans_on_scan(root, monkeypatch, tmp_path):

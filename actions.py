@@ -152,17 +152,21 @@ def stop_all(adb, apps, log, block_popups=False, progress=None):
     return stopped, len(targets)
 
 
+SUSPICIOUS = ("HIGH", "Medium")
+
+
 def clean_risky(adb, apps, log, progress=None):
     """One-click safe clean (used by the big green button).
 
-    Closes every downloaded app, blocks pop-up permissions, then PAUSES every
-    HIGH-risk non-protected app. Everything here is reversible (nothing deleted).
-    Returns {'stopped': n, 'paused': n}.
+    Closes every downloaded app, blocks pop-up permissions on all of them, then
+    PAUSES every suspicious (HIGH or Medium) non-protected app -- Medium catches
+    the Play-Store "cleaner/booster" pop-up apps that aren't sideloaded.
+    Everything here is reversible (nothing deleted). Returns {'stopped','paused'}.
     """
     stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
     paused = 0
     for app in apps:
-        if app.risk == "HIGH" and app.enabled and not app.protected:
+        if app.risk in SUSPICIOUS and app.enabled and not app.protected:
             try:
                 if pause(adb, app, log):
                     paused += 1

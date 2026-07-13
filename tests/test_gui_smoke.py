@@ -146,3 +146,16 @@ def test_one_click_clean(root, monkeypatch, tmp_path):
     pump(root, 1.0)
     assert "com.random.adware" in app.adb.disabled       # risky app paused
     assert "com.google.android.gms" not in app.adb.disabled  # protected untouched
+
+
+def test_shop_mode_auto_cleans_on_scan(root, monkeypatch, tmp_path):
+    """Shop mode: a scan auto-triggers the clean (confirmed once), no CLEAN click."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)                                 # connects + scans, shop off -> no clean
+    assert "com.random.adware" not in app.adb.disabled
+    app.shop_mode.set(True)
+    app.on_rescan()                                 # scan -> shop mode auto-cleans
+    pump(root, 1.0)
+    assert "com.random.adware" in app.adb.disabled
+    assert "com.google.android.gms" not in app.adb.disabled

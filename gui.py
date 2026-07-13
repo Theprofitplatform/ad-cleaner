@@ -114,6 +114,7 @@ class AdCleanerApp:
         self.alive = True
         self.busy = False
         self._pending_clean = False
+        self.shop_mode = tk.BooleanVar(value=False)
 
         self._build_ui()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -265,6 +266,8 @@ class AdCleanerApp:
         self.suspicious_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(bar, text="Show risky apps only", variable=self.suspicious_var,
                         command=self._render_table).pack(side="left", padx=12)
+        ttk.Checkbutton(bar, text="🔁  Shop mode (auto-clean each phone)",
+                        variable=self.shop_mode).pack(side="right", padx=8)
         self.progress = ttk.Progressbar(bar, mode="determinate", length=220)
 
         mid = ttk.Frame(tab)
@@ -591,6 +594,12 @@ class AdCleanerApp:
         if self._pending_clean:
             self._pending_clean = False
             self._start_clean()
+        elif self.shop_mode.get():
+            if any(a.risk in SUSPICIOUS and not a.protected for a in apps):
+                self._start_clean()
+            else:
+                self.status_line("✅ Nothing risky found — this phone looks clean. "
+                                 "Unplug and connect the next one.")
 
     def _scan_failed(self, err):
         self.busy = False
@@ -744,15 +753,16 @@ class AdCleanerApp:
         self._start_clean()
 
     def _start_clean(self):
-        n = sum(a.risk == "HIGH" and not a.protected for a in self.apps)
+        n = sum(a.risk in SUSPICIOUS and not a.protected for a in self.apps)
         if not messagebox.askyesno(
-                "Clean my phone",
+                "Clean this phone",
                 "Ad Cleaner will now:\n\n"
                 "     •  Close every downloaded app\n"
-                "     •  Block pop-up ads\n"
-                f"     •  Pause the {n} app(s) most likely causing trouble\n\n"
+                "     •  Block pop-up ads on all of them\n"
+                f"     •  Pause the {n} junk / pop-up app(s) it found\n\n"
                 "Nothing is deleted — you can undo anything from the History tab.\n\n"
-                "Go ahead?"):
+                "Go ahead?  (press Enter for Yes)",
+                default="yes"):
             return
         self.busy = True
         self.status_line("Cleaning your phone…")
@@ -777,12 +787,15 @@ class AdCleanerApp:
         if err:
             self.status_line("Clean failed: " + err)
             return
-        self.status_line(f"✅ Done! Closed {res['stopped']} app(s) and paused "
-                         f"{res['paused']} risky app(s). Your phone should be usable now.")
+        summary = f"Closed {res['stopped']} app(s) and paused {res['paused']} risky one(s)."
+        if self.shop_mode.get():
+            # Hands-off: no modal to dismiss, just a clear cue for the next phone.
+            self.status_line(f"✅ Cleaned — {summary}  Unplug and connect the next phone.")
+            return
+        self.status_line(f"✅ Done! {summary} Your phone should be usable now.")
         messagebox.showinfo(
             "All done",
-            f"Closed {res['stopped']} downloaded app(s) and paused {res['paused']} "
-            "risky app(s).\n\n"
+            f"{summary}\n\n"
             "Your photos, messages and system apps were not touched.\n\n"
             "Look through the list and press Uninstall on anything you don't want. "
             "You can undo anything from the History tab.")

@@ -134,20 +134,22 @@ def test_force_stop_not_undoable(log):
     assert not can_undo(entry)
 
 
-def test_clean_risky_stops_all_and_pauses_only_high(log):
+def test_clean_risky_stops_all_and_pauses_suspicious(log):
     adb = FakeAdb()
     adware = App(package="com.random.adware", installer=None, overlay=True, risk="HIGH")
+    booster = App(package="com.play.cleaner", installer="com.android.vending",
+                  risk="Medium")  # Play-Store pop-up app -> Medium, must be paused too
     protected = App(package="com.google.android.gms", installer="com.android.vending",
                     risk="HIGH")  # protected -> must be left alone
     low = App(package="com.spotify.music", installer="com.android.vending", risk="Low")
-    res = clean_risky(adb, [adware, protected, low], log)
-    # stop_all hits both non-protected enabled apps; protected excluded.
-    assert res["stopped"] == 2
-    # only the HIGH, non-protected app gets paused.
-    assert res["paused"] == 1
+    res = clean_risky(adb, [adware, booster, protected, low], log)
+    # stop_all hits all non-protected enabled apps; protected excluded.
+    assert res["stopped"] == 3
+    # HIGH and Medium get paused; Low and protected do not.
+    assert res["paused"] == 2
     assert "com.random.adware" in adb.disabled
+    assert "com.play.cleaner" in adb.disabled
     assert "com.google.android.gms" not in adb.disabled
-    assert adware.stopped and low.stopped
 
 
 def test_log_is_appended_and_persisted(tmp_path):

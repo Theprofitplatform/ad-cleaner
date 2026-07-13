@@ -5,6 +5,7 @@ re-querying device state -> append to the append-only undo log.
 """
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -250,6 +251,58 @@ def clear_caches(adb, log=None):
         log.append(adb.serial, "(all apps)", "clear-cache", "-",
                    ["pm", "trim-caches"], "ok")
     return True
+
+
+# --- Private DNS (system-wide ad blocking) ----------------------------------
+
+DNS_PROVIDERS = {
+    "AdGuard — blocks ads + trackers": "dns.adguard.com",
+    "Cloudflare Family — malware + adult": "family.cloudflare-dns.com",
+}
+_DNS_HOSTNAME_RE = re.compile(r"^[a-z0-9.-]+$")
+
+
+def read_private_dns(adb):
+    """Return (mode, hostname). hostname is '' unless mode == 'hostname'."""
+    mode = (adb.shell_text(["settings", "get", "global", "private_dns_mode"]) or "").strip()
+    host = (adb.shell_text(["settings", "get", "global", "private_dns_specifier"]) or "").strip()
+    if mode in ("", "null"):
+        mode = "off"
+    if host in ("", "null"):
+        host = ""
+    return mode, host
+
+
+def set_private_dns(adb, hostname, log):
+    """Turn Private DNS on with `hostname` (a DNS-over-TLS resolver).
+
+    Blocks ads/trackers in every app. Reversible via clear_private_dns / the
+    Off button. Logged as 'set-dns' but NOT in UNDOABLE:
+    ponytail: the On/Off buttons are the reversal path, no history-undo needed.
+    """
+    hostname = (hostname or "").strip().lower()
+    if not hostname or not _DNS_HOSTNAME_RE.match(hostname):
+        raise ValueError("That doesn't look like a valid DNS address.")
+    adb.shell_text(["settings", "put", "global", "private_dns_mode", "hostname"])
+    adb.shell_text(["settings", "put", "global", "private_dns_specifier", hostname])
+    mode, host = read_private_dns(adb)
+    ok = mode == "hostname" and host == hostname
+    if log is not None:
+        log.append(adb.serial, "(device)", "set-dns", "off",
+                   ["settings", "put", "global", "private_dns_specifier", hostname],
+                   "ok" if ok else "failed")
+    return ok
+
+
+def clear_private_dns(adb, log):
+    """Turn Private DNS off (mode=off). Reversible via set_private_dns."""
+    adb.shell_text(["settings", "put", "global", "private_dns_mode", "off"])
+    ok = read_private_dns(adb)[0] == "off"
+    if log is not None:
+        log.append(adb.serial, "(device)", "clear-dns", "on",
+                   ["settings", "put", "global", "private_dns_mode", "off"],
+                   "ok" if ok else "failed")
+    return ok
 
 
 # --- Undo -------------------------------------------------------------------

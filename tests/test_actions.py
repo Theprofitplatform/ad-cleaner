@@ -286,3 +286,12 @@ def test_clear_private_dns_turns_off(log):
     assert clear_private_dns(adb, log) is True
     assert read_private_dns(adb) == ("off", "")
     assert log.entries[-1]["action"] == "clear-dns"
+
+
+def test_clean_risky_reports_popups_blocked(log):
+    adb = FakeAdb()
+    adware = App(package="com.random.adware", installer=None, overlay=True, risk="HIGH")
+    quiet = App(package="com.play.cleaner", installer="com.android.vending",
+                overlay=False, risk="Medium")
+    res = clean_risky(adb, [adware, quiet], log)
+    assert res["popups_blocked"] == 1     # only the overlay app is denied

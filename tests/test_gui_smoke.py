@@ -128,6 +128,7 @@ def _wire(gui_mod, monkeypatch, tmp_path, adb_cls=FakeAdb):
                         lambda adb, progress=None, now=None: make_apps())
     monkeypatch.setattr(gui_mod.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(gui_mod.messagebox, "showinfo", lambda *a, **k: None)
+    monkeypatch.setattr(gui_mod.webbrowser, "open", lambda *a, **k: None)
 
 
 def test_opens_and_shows_wizard_without_phone(root, monkeypatch, tmp_path):
@@ -258,6 +259,19 @@ def test_shop_mode_auto_cleans_on_scan(root, monkeypatch, tmp_path):
     pump(root, 1.0)
     assert "com.random.adware" in app.adb.disabled
     assert "com.google.android.gms" not in app.adb.disabled
+
+
+def test_clean_writes_receipt_html(root, monkeypatch, tmp_path):
+    from adb import data_dir
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.on_clean()
+    pump(root, 1.0)
+    reports = list((data_dir() / "reports").glob("receipt_*.html"))
+    assert reports, "a receipt HTML file should be written after a clean"
+    text = reports[-1].read_text(encoding="utf-8")
+    assert "Ad Cleaner — clean receipt" in text
 
 
 def test_dns_toggle_sets_and_clears(root, monkeypatch, tmp_path):

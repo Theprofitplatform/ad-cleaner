@@ -5,11 +5,11 @@ Tk main thread through a queue (Tkinter is not thread-safe). The UI never
 freezes and never crashes on an ADB failure -- errors land in the status bar.
 """
 
-import csv
 import json
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from tkinter import messagebox, ttk
 
@@ -21,6 +21,7 @@ from actions import (
 )
 from crashes import read_crash_report, summarize
 from device import read_device_stats
+from report import render_history_html, render_receipt_html
 from scanner import build_inventory
 from setup_helper import download_platform_tools
 
@@ -121,6 +122,7 @@ class AdCleanerApp:
         self.adb = None
         self.serial = None
         self.model = ""
+        self.android = ""
         self.apps = []
         self.selected = None
         self.log = ActionLog()
@@ -775,6 +777,7 @@ class AdCleanerApp:
 
     def _on_connected(self, model, android):
         self.model = model
+        self.android = android
         self._set_status("green", "Connected")
         self._set_wizard_state("connected")
         extra = f"Android {android}" if android else ""
@@ -1163,6 +1166,37 @@ class AdCleanerApp:
             return
         self._start_clean()
 
+    def _free_gb(self):
+        """Free space on /data in GB, or 0.0 if it can't be read.
+        ponytail: reuses read_device_stats (0.1 GB granularity); sub-100 MB
+        cache trims read as 0 freed, which is fine for a receipt.
+        """
+        try:
+            return read_device_stats(self.adb).get("storage_free_gb", 0) or 0.0
+        except Exception:
+            return 0.0
+
+    def _save_receipt(self, res):
+        """Write a printable HTML receipt for this clean; return its path (or None)."""
+        try:
+            receipt = {
+                "when": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "model": getattr(self, "model", "") or "",
+                "android": getattr(self, "android", "") or "",
+                "stopped": res.get("stopped", 0), "acted": res.get("acted", 0),
+                "removed": res.get("removed", False),
+                "popups_blocked": res.get("popups_blocked", 0),
+                "packages": res.get("packages", []), "dns": res.get("dns", "Off"),
+                "freed_gb": res.get("freed_gb", 0),
+            }
+            folder = data_dir() / "reports"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"receipt_{datetime.now():%Y%m%d_%H%M%S}.html"
+            path.write_text(render_receipt_html(receipt), encoding="utf-8")
+            return path
+        except Exception:
+            return None
+
     def _start_clean(self):
         risky = [a for a in self.apps if a.risk in SUSPICIOUS and not a.protected]
         n = len(risky)
@@ -1192,8 +1226,16 @@ class AdCleanerApp:
 
         def work():
             try:
+                before = self._free_gb()
                 res = clean_risky(self.adb, self.apps, self.log, progress=progress,
                                   remove=remove)
+                res["freed_gb"] = round(max(0.0, self._free_gb() - before), 1)
+                try:
+                    mode, host = read_private_dns(self.adb)
+                    label = next((k for k, v in DNS_PROVIDERS.items() if v == host), host)
+                    res["dns"] = f"On — {label}" if mode == "hostname" and host else "Off"
+                except Exception:
+                    res["dns"] = "Off"
                 self._post(self._clean_done, res, None)
             except Exception as e:
                 self._post(self._clean_done, None, str(e))
@@ -1216,6 +1258,7 @@ class AdCleanerApp:
         self._update_detail()
         verb = "removed" if res["removed"] else "paused"
         summary = f"Closed {res['stopped']} app(s) and {verb} {res['acted']} risky one(s)."
+        receipt_path = self._save_receipt(res)
         if self.shop_mode.get():
             # Hands-off: a loud on-screen cue (+ chime) for the next phone; no modal.
             self._set_summary("✅  DONE — unplug and connect the next phone.", "good")
@@ -1228,12 +1271,18 @@ class AdCleanerApp:
             return
         self._set_summary(f"✅  Done — {summary}", "good")
         self.status_line(f"✅ Done! {summary} Your phone should be usable now.", "good")
-        messagebox.showinfo(
+        open_it = messagebox.askyesno(
             "All done",
             f"{summary}\n\n"
-            "Your photos, messages and system apps were not touched.\n\n"
-            "Look through the list and press Uninstall on anything you don't want. "
-            "You can undo anything from the History tab.")
+            "Your photos, messages and system apps were not touched.\n"
+            "You can undo anything from the History tab.\n\n"
+            "Open a printable receipt now?",
+            default="no")
+        if open_it and receipt_path:
+            try:
+                webbrowser.open(receipt_path.as_uri())
+            except Exception:
+                pass
 
     # --- device maintenance -------------------------------------------------
 
@@ -1545,15 +1594,14 @@ class AdCleanerApp:
         folder = data_dir() / "reports"
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = folder / f"report_{stamp}.csv"
+        path = folder / f"history_{stamp}.html"
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["Time", "Phone", "App", "Action", "Result"])
-                for e in entries:
-                    w.writerow([e.get("time", ""), e.get("serial", ""), e.get("package", ""),
-                                e.get("action", ""), e.get("result", "")])
+            path.write_text(render_history_html(entries), encoding="utf-8")
             self.status_line(f"✅ Report saved to {path}", "good")
+            try:
+                webbrowser.open(path.as_uri())
+            except Exception:
+                pass
         except Exception as ex:
             self.status_line("Couldn't save report. " + self._friendly(str(ex)), "error")
 

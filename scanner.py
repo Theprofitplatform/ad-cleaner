@@ -14,21 +14,42 @@ from protected import is_protected, is_spoof
 WEIGHTS = {
     "overlay": 40,          # allowed to draw over other apps (the popup mechanism)
     "sideloaded": 25,       # installer is null or not a known store
+    "hidden": 20,           # installed but has no icon in the app drawer
     "recent_install": 15,   # first installed within RECENT_DAYS
     "device_admin": 20,     # active device administrator
     "request_install": 10,  # holds REQUEST_INSTALL_PACKAGES
     "accessibility": 10,    # holds a BIND_ACCESSIBILITY_SERVICE grant
+    "sensitive_data": 10,   # can read SMS / call log / contacts
     "random_name": 10,      # package name has a random-looking segment
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
     "sideloaded": "Installed from outside an app store (sideloaded)",
+    "hidden": "Hidden — no icon in the app drawer",
     "recent_install": "Installed in the last 30 days",
     "device_admin": "Is a device administrator",
     "request_install": "Can install other apps",
     "accessibility": "Uses accessibility access",
+    "sensitive_data": "Can read your texts, calls, or contacts",
     "random_name": "Has a random-looking package name",
 }
+
+# Sensitive permissions shown in the detail pane (BUILD_PLAN 4.2 / risk mgmt).
+SENSITIVE_PERMS = [
+    ("SEND_SMS", "Send text messages"),
+    ("READ_SMS", "Read your text messages"),
+    ("RECEIVE_SMS", "Read incoming texts"),
+    ("READ_CALL_LOG", "Read your call history"),
+    ("CALL_PHONE", "Make phone calls"),
+    ("READ_CONTACTS", "Read your contacts"),
+    ("ACCESS_FINE_LOCATION", "Track your location"),
+    ("RECORD_AUDIO", "Use the microphone"),
+    ("CAMERA", "Use the camera"),
+    ("READ_PHONE_STATE", "Read phone info (number, IMEI)"),
+    ("MANAGE_EXTERNAL_STORAGE", "Access all your files"),
+]
+# Holding any of these counts as sensitive personal-data access.
+_PERSONAL_DATA = ("SEND_SMS", "READ_SMS", "RECEIVE_SMS", "READ_CALL_LOG", "READ_CONTACTS")
 SPOOF_REASON = "Pretends to be a system app"
 HIGH_THRESHOLD = 55
 MEDIUM_THRESHOLD = 30
@@ -49,6 +70,9 @@ class App:
     first_install: datetime | None = None
     request_install: bool = False
     accessibility: bool = False
+    hidden: bool = False              # no launcher icon on the phone
+    sensitive_data: bool = False      # can read SMS / calls / contacts
+    sensitive_perms: list = field(default_factory=list)  # human-readable perm labels
     stopped: bool = False             # transient: force-stopped this session
     score: int = 0
     risk: str = "Low"
@@ -145,11 +169,20 @@ def parse_first_install(dump_text):
 
 def parse_perms(dump_text):
     """Return the permission flags of interest present in a package dump."""
+    sensitive = [label for key, label in SENSITIVE_PERMS
+                 if f"permission.{key}" in dump_text]
     return {
         "request_install": "REQUEST_INSTALL_PACKAGES" in dump_text,
         "accessibility": "BIND_ACCESSIBILITY_SERVICE" in dump_text,
         "overlay_perm": "SYSTEM_ALERT_WINDOW" in dump_text,  # old-Android fallback
+        "sensitive_perms": sensitive,
+        "sensitive_data": any(f"permission.{k}" in dump_text for k in _PERSONAL_DATA),
     }
+
+
+def parse_launcher_packages(output):
+    """`cmd package query-activities … LAUNCHER` -> set of packages with an icon."""
+    return {m.group(1) for m in re.finditer(r"([\w.]+)/[\w.$]+", output)}
 
 
 # --- Scoring ----------------------------------------------------------------
@@ -176,12 +209,14 @@ def score_app(app, now):
     signals = {
         "overlay": app.overlay,
         "sideloaded": app.installer is None,
+        "hidden": app.hidden,
         "recent_install": bool(
             app.first_install and now - app.first_install <= timedelta(days=RECENT_DAYS)
         ),
         "device_admin": app.device_admin,
         "request_install": app.request_install,
         "accessibility": app.accessibility,
+        "sensitive_data": app.sensitive_data,
         "random_name": looks_random(app.package),
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
@@ -220,6 +255,11 @@ def build_inventory(adb, progress=None, now=None):
         ["appops", "query-op", "SYSTEM_ALERT_WINDOW", "allow"])))
     admins = parse_device_admins(_safe(lambda: adb.shell_text(
         ["dumpsys", "device_policy"])))
+    launchers = parse_launcher_packages(_safe(lambda: adb.shell_text(
+        ["cmd", "package", "query-activities", "--brief",
+         "-a", "android.intent.action.MAIN",
+         "-c", "android.intent.category.LAUNCHER"])))
+    have_launchers = bool(launchers)  # skip hidden-detection if the query failed
 
     apps = []
     packages = sorted(installers)
@@ -241,6 +281,9 @@ def build_inventory(adb, progress=None, now=None):
             first_install=parse_first_install(dump),
             request_install=perms["request_install"],
             accessibility=perms["accessibility"],
+            hidden=have_launchers and pkg not in launchers,
+            sensitive_data=perms["sensitive_data"],
+            sensitive_perms=perms["sensitive_perms"],
         )
         score_app(app, now)
         apps.append(app)

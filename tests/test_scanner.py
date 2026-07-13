@@ -6,8 +6,8 @@ import pytest
 import scanner
 from scanner import (
     App, build_inventory, looks_random, parse_device_admins, parse_disabled,
-    parse_first_install, parse_overlay_allowed, parse_perms, parse_third_party,
-    prettify_label, score_app,
+    parse_first_install, parse_launcher_packages, parse_overlay_allowed, parse_perms,
+    parse_third_party, prettify_label, score_app,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -33,6 +33,8 @@ class FakeAdb:
             return fx("device_policy.txt")
         if args[:2] == ["dumpsys", "package"]:
             return fx(f"dumpsys_{args[2]}.txt")
+        if args[:2] == ["cmd", "package"]:  # query-activities (launchers)
+            return fx("launchers.txt")
         return ""
 
 
@@ -77,6 +79,39 @@ def test_parse_perms():
     assert not perms["accessibility"]
     admin_perms = parse_perms(fx("dumpsys_com.evil.deviceadmin.txt"))
     assert admin_perms["accessibility"]
+
+
+def test_parse_perms_sensitive():
+    text = ("requested permissions:\n"
+            "  android.permission.READ_SMS\n"
+            "  android.permission.ACCESS_FINE_LOCATION\n"
+            "  android.permission.CAMERA\n")
+    perms = parse_perms(text)
+    assert "Read your text messages" in perms["sensitive_perms"]
+    assert "Track your location" in perms["sensitive_perms"]
+    assert "Use the camera" in perms["sensitive_perms"]
+    assert perms["sensitive_data"] is True  # READ_SMS counts as personal-data access
+
+
+def test_parse_launcher_packages():
+    out = "2 activities found:\n  com.foo/.Main\n  com.bar/com.bar.Home\n"
+    assert parse_launcher_packages(out) == {"com.foo", "com.bar"}
+
+
+def test_hidden_app_scored_and_reasoned():
+    app = App(package="com.sneaky.hidden", installer=None, hidden=True,
+              first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert scanner.REASONS["hidden"] in app.reasons
+    assert app.score == 45  # sideloaded 25 + hidden 20
+
+
+def test_sensitive_data_scored():
+    app = App(package="com.spy.tool", installer="com.android.vending",
+              sensitive_data=True, first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert scanner.REASONS["sensitive_data"] in app.reasons
+    assert app.score == 10
 
 
 # --- Label + heuristic tests ------------------------------------------------
@@ -138,6 +173,9 @@ def test_build_inventory_scores_whole_device():
     assert apps["com.evil.deviceadmin"].risk == "HIGH"
     assert apps["com.evil.deviceadmin"].device_admin
     assert apps["com.evil.deviceadmin"].admin_component.endswith("AdminReceiver")
+    # deviceadmin has no launcher entry -> flagged hidden; others have icons.
+    assert apps["com.evil.deviceadmin"].hidden
+    assert not apps["com.spotify.music"].hidden
     assert apps["com.google.android.fakecore"].risk == "HIGH"
     # Highest risk sorts first.
     ordered = build_inventory(FakeAdb(), now=NOW)

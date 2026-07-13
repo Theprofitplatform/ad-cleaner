@@ -152,6 +152,14 @@ def test_one_click_clean(root, monkeypatch, tmp_path):
     assert "com.google.android.gms" not in app.adb.disabled  # protected untouched
 
 
+def test_device_tab_buttons_enable_on_connect(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    assert str(app.cache_btn["state"]) == "normal"
+    assert str(app.dev_refresh_btn["state"]) == "normal"
+
+
 def test_uninstall_mode_removes_apps(root, monkeypatch, tmp_path):
     """With the uninstall toggle on, clean removes risky apps and drops them."""
     _wire(gui, monkeypatch, tmp_path)

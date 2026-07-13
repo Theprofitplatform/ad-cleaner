@@ -183,6 +183,19 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
     return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted}
 
 
+def clear_caches(adb, log=None):
+    """Free space by trimming every app's cache (safe: no user data touched).
+
+    `pm trim-caches <huge>` tells Android to purge cached files across all apps.
+    Returns True on success.
+    """
+    adb.shell_text(["pm", "trim-caches", "9999999999999"], timeout=60)
+    if log is not None:
+        log.append(adb.serial, "(all apps)", "clear-cache", "-",
+                   ["pm", "trim-caches"], "ok")
+    return True
+
+
 # --- Undo -------------------------------------------------------------------
 
 def can_undo(entry):

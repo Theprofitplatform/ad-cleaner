@@ -1,0 +1,4 @@
+3 activities found:
+  com.spotify.music/com.spotify.music.MainActivity
+  com.random.freegift/com.random.freegift.SplashActivity
+  com.google.android.fakecore/.Main

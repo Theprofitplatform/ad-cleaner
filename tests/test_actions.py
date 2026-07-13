@@ -4,8 +4,8 @@ import pytest
 
 import actions
 from actions import (
-    ActionLog, ProtectedAppError, can_undo, clean_risky, pause, resume, stop_all,
-    undo, uninstall,
+    ActionLog, ProtectedAppError, can_undo, clean_risky, clear_caches, pause, resume,
+    stop_all, undo, uninstall,
 )
 from scanner import App
 
@@ -162,6 +162,13 @@ def test_clean_risky_remove_uninstalls_suspicious(log):
     assert res["packages"] == ["com.random.adware"]
     assert "com.random.adware" not in adb.installed   # actually uninstalled
     assert "com.google.android.gms" in adb.installed  # protected left alone
+
+
+def test_clear_caches_runs_and_logs(log):
+    adb = FakeAdb()
+    assert clear_caches(adb, log) is True
+    assert ["pm", "trim-caches", "9999999999999"] in adb.calls
+    assert log.entries[-1]["action"] == "clear-cache"
 
 
 def test_log_is_appended_and_persisted(tmp_path):

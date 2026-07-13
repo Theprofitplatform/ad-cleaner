@@ -12,9 +12,10 @@ from tkinter import messagebox, ttk
 
 from adb import Adb, AdbError, find_adb
 from actions import (
-    ActionLog, ProtectedAppError, can_undo, clean_risky, pause, resume, stop_all,
-    undo, uninstall,
+    ActionLog, ProtectedAppError, can_undo, clean_risky, clear_caches, pause, resume,
+    stop_all, undo, uninstall,
 )
+from device import read_device_stats
 from scanner import build_inventory
 from setup_helper import download_platform_tools
 
@@ -246,6 +247,7 @@ class AdCleanerApp:
         nb.pack(fill="both", expand=True, padx=10, pady=(6, 2))
         self._build_apps_tab(nb)
         self._build_history_tab(nb)
+        self._build_device_tab(nb)
         self._build_help_tab(nb)
         self.notebook = nb
 
@@ -329,6 +331,39 @@ class AdCleanerApp:
         self._enable_btn(self.undo_btn, True)  # always allowed to try; validates on click
         self.undo_btn.pack(side="bottom", pady=8)
         self._refresh_history()
+
+    def _build_device_tab(self, nb):
+        tab = ttk.Frame(nb, padding=18)
+        nb.add(tab, text="Device")
+        ttk.Label(tab, text="Device maintenance", font=(FONT, 14, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Storage, memory and temperature for the connected phone.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 14))
+
+        self.dev_vars = {k: tk.StringVar(value="—")
+                         for k in ("storage", "ram", "temp", "battery")}
+        grid = ttk.Frame(tab)
+        grid.pack(anchor="w")
+        rows = [("💾  Storage", "storage"), ("🧠  Memory (RAM)", "ram"),
+                ("🌡️  Battery temperature", "temp"), ("🔋  Battery level", "battery")]
+        for i, (label, key) in enumerate(rows):
+            ttk.Label(grid, text=label, font=(FONT, 11, "bold")).grid(
+                row=i, column=0, sticky="w", padx=(0, 24), pady=6)
+            ttk.Label(grid, textvariable=self.dev_vars[key], font=(FONT, 11)).grid(
+                row=i, column=1, sticky="w", pady=6)
+
+        btns = ttk.Frame(tab)
+        btns.pack(anchor="w", pady=(18, 0))
+        self.dev_refresh_btn = self._flat_button(btns, "🔄  Refresh",
+                                                 self.on_dev_refresh, SLATE, SLATE_HOT)
+        self.dev_refresh_btn.pack(side="left", padx=(0, 8))
+        self.cache_btn = self._flat_button(btns, "🧹  Clear app caches",
+                                           self.on_clear_caches, GREEN, GREEN_HOT)
+        self.cache_btn.pack(side="left")
+        for b in (self.dev_refresh_btn, self.cache_btn):
+            self._enable_btn(b, False)
+        ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
+                            "It never deletes your photos, messages or accounts.",
+                  style="Muted.TLabel", wraplength=760).pack(anchor="w", pady=(12, 0))
 
     def _build_help_tab(self, nb):
         tab = ttk.Frame(nb)
@@ -539,6 +574,9 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, True)
         self._enable_btn(self.clean_btn, True)
         self._enable_btn(self.stop_btn, True)
+        self._enable_btn(self.dev_refresh_btn, True)
+        self._enable_btn(self.cache_btn, True)
+        self._refresh_device()
         self.status_line("Phone connected. Scanning apps…")
         self.on_rescan()
 
@@ -552,6 +590,10 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, False)
         self._enable_btn(self.clean_btn, False)
         self._enable_btn(self.stop_btn, False)
+        self._enable_btn(self.dev_refresh_btn, False)
+        self._enable_btn(self.cache_btn, False)
+        for v in self.dev_vars.values():
+            v.set("—")
         if was:
             self.status_line("Phone disconnected.")
             self.apps = []
@@ -661,8 +703,11 @@ class AdCleanerApp:
             for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
                 self._enable_btn(b, False)
             return
-        reasons = "\n".join("• " + r for r in a.reasons) or "Nothing suspicious found."
-        self.detail_reasons.config(text=reasons)
+        lines = ["• " + r for r in a.reasons] or ["Nothing suspicious found."]
+        if a.sensitive_perms:
+            lines.append("")
+            lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
+        self.detail_reasons.config(text="\n".join(lines))
         self._enable_btn(self.pause_btn, a.enabled)
         self._enable_btn(self.resume_btn, not a.enabled)
         self._enable_btn(self.uninstall_btn, True)
@@ -816,6 +861,72 @@ class AdCleanerApp:
             "Your photos, messages and system apps were not touched.\n\n"
             "Look through the list and press Uninstall on anything you don't want. "
             "You can undo anything from the History tab.")
+
+    # --- device maintenance -------------------------------------------------
+
+    def on_dev_refresh(self):
+        if self.serial:
+            self._refresh_device()
+
+    def _refresh_device(self):
+        if not self.serial:
+            return
+
+        def work():
+            try:
+                stats = read_device_stats(self.adb)
+                self._post(self._show_device, stats)
+            except Exception:
+                pass
+
+        self._run_bg(work)
+
+    def _show_device(self, s):
+        self.dev_vars["storage"].set(
+            f"{s['storage_used_gb']} GB used of {s['storage_total_gb']} GB   "
+            f"({s['storage_free_gb']} GB free)")
+        self.dev_vars["ram"].set(
+            f"{s['ram_used_gb']} GB used of {s['ram_total_gb']} GB   ({s['ram_pct']}%)")
+        self.dev_vars["temp"].set(
+            f"{s['battery_temp_c']} °C" if s["battery_temp_c"] is not None else "—")
+        self.dev_vars["battery"].set(
+            f"{s['battery_level']}%" if s["battery_level"] is not None else "—")
+
+    def on_clear_caches(self):
+        if self.busy or not self.serial:
+            return
+        if not messagebox.askyesno(
+                "Clear app caches",
+                "Clear the temporary cache files for all apps?\n\n"
+                "This frees up space and can fix misbehaving apps. It does NOT delete "
+                "your photos, messages, accounts, or app data.\n\n"
+                "Go ahead?", default="yes"):
+            return
+        self.busy = True
+        self.status_line("Clearing app caches…")
+
+        def work():
+            try:
+                before = read_device_stats(self.adb)["storage_free_gb"]
+                clear_caches(self.adb, self.log)
+                after = read_device_stats(self.adb)
+                self._post(self._cache_done, after,
+                           round(after["storage_free_gb"] - before, 1), None)
+            except Exception as e:
+                self._post(self._cache_done, None, 0, str(e))
+
+        self._run_bg(work)
+
+    def _cache_done(self, stats, freed, err):
+        self.busy = False
+        self._refresh_history()
+        if err:
+            self.status_line("Couldn't clear caches: " + err)
+            return
+        if stats:
+            self._show_device(stats)
+        self.status_line(f"✅ Caches cleared. Freed about {freed} GB." if freed > 0
+                         else "✅ Caches cleared.")
 
     # --- STOP ALL -----------------------------------------------------------
 

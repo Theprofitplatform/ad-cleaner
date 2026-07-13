@@ -1,0 +1,19 @@
+Packages:
+  Package [com.evil.deviceadmin] (d4e5f6):
+    userId=10199
+    pkg=Package{1a2b3c com.evil.deviceadmin}
+    codePath=/data/app/~~Ww==/com.evil.deviceadmin-Ee==
+    versionCode=3 minSdk=21 targetSdk=26
+    versionName=2.1
+    flags=[ HAS_CODE ]
+    dataDir=/data/user/0/com.evil.deviceadmin
+    firstInstallTime=2024-05-10 09:00:00
+    lastUpdateTime=2024-05-10 09:00:00
+    installerPackageName=null
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.BIND_DEVICE_ADMIN
+      android.permission.BIND_ACCESSIBILITY_SERVICE
+      android.permission.RECEIVE_BOOT_COMPLETED
+    install permissions:
+      android.permission.INTERNET: granted=true

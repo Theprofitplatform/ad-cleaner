@@ -1,0 +1,18 @@
+Packages:
+  Package [com.spotify.music] (0a0b0c):
+    userId=10156
+    pkg=Package{2b3c4d com.spotify.music}
+    codePath=/data/app/~~AbC==/com.spotify.music-XyZ==
+    versionCode=8905 minSdk=21 targetSdk=33
+    versionName=8.9.0.517
+    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    dataDir=/data/user/0/com.spotify.music
+    firstInstallTime=2020-01-15 10:30:00
+    lastUpdateTime=2024-04-02 08:11:45
+    signatures=[...]
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.BLUETOOTH
+      android.permission.ACCESS_NETWORK_STATE
+    install permissions:
+      android.permission.INTERNET: granted=true

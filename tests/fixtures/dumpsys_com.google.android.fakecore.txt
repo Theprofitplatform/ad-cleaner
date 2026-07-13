@@ -1,0 +1,14 @@
+Packages:
+  Package [com.google.android.fakecore] (ffeecc):
+    userId=10240
+    pkg=Package{5d6e7f com.google.android.fakecore}
+    codePath=/data/app/~~Pp==/com.google.android.fakecore-Rr==
+    versionCode=1 minSdk=19 targetSdk=27
+    versionName=1.0
+    flags=[ HAS_CODE ]
+    dataDir=/data/user/0/com.google.android.fakecore
+    firstInstallTime=2019-03-03 08:00:00
+    lastUpdateTime=2019-03-03 08:00:00
+    installerPackageName=null
+    requested permissions:
+      android.permission.INTERNET

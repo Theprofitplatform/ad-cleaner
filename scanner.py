@@ -1,0 +1,278 @@
+"""App inventory + suspicion scoring (BUILD_PLAN 4.2).
+
+Pure parse/score functions (tested against fixtures) plus a thin
+`build_inventory` that drives an Adb object. All device I/O lives in adb.py.
+"""
+
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+from protected import is_protected, is_spoof
+
+# --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
+WEIGHTS = {
+    "overlay": 40,          # allowed to draw over other apps (the popup mechanism)
+    "sideloaded": 25,       # installer is null or not a known store
+    "recent_install": 15,   # first installed within RECENT_DAYS
+    "device_admin": 20,     # active device administrator
+    "request_install": 10,  # holds REQUEST_INSTALL_PACKAGES
+    "accessibility": 10,    # holds a BIND_ACCESSIBILITY_SERVICE grant
+    "random_name": 10,      # package name has a random-looking segment
+}
+REASONS = {
+    "overlay": "Can draw pop-ups over other apps",
+    "sideloaded": "Installed from outside an app store (sideloaded)",
+    "recent_install": "Installed in the last 30 days",
+    "device_admin": "Is a device administrator",
+    "request_install": "Can install other apps",
+    "accessibility": "Uses accessibility access",
+    "random_name": "Has a random-looking package name",
+}
+SPOOF_REASON = "Pretends to be a system app"
+HIGH_THRESHOLD = 55
+MEDIUM_THRESHOLD = 30
+RECENT_DAYS = 30
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class App:
+    package: str
+    label: str = ""
+    installer: str | None = None
+    is_system: bool = False           # scanned apps are all third-party
+    enabled: bool = True              # False => paused/disabled
+    overlay: bool = False
+    device_admin: bool = False
+    admin_component: str | None = None
+    first_install: datetime | None = None
+    request_install: bool = False
+    accessibility: bool = False
+    stopped: bool = False             # transient: force-stopped this session
+    score: int = 0
+    risk: str = "Low"
+    reasons: list = field(default_factory=list)
+
+    @property
+    def protected(self):
+        return is_protected(self.package, self.installer, self.is_system)
+
+    @property
+    def source(self):
+        if self.installer in (None, "", "null"):
+            return "Sideloaded"
+        return self.installer
+
+    @property
+    def status(self):
+        if not self.enabled:
+            return "Paused"
+        return "Stopped" if self.stopped else "Running"
+
+
+def prettify_label(package):
+    """`com.foo.flashlight` -> `Flashlight (com.foo.flashlight)`."""
+    seg = package.split(".")[-1] or package
+    return f"{seg[:1].upper()}{seg[1:]} ({package})"
+
+
+# --- Parsers ----------------------------------------------------------------
+
+def parse_third_party(output):
+    """`pm list packages -3 -i` -> {package: installer or None}."""
+    result = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("package:"):
+            continue
+        m = re.match(r"package:(\S+)(?:\s+installer=(\S+))?", line)
+        if not m:
+            continue
+        pkg = m.group(1)
+        inst = m.group(2)
+        if inst in (None, "null"):
+            inst = None
+        result[pkg] = inst
+    return result
+
+
+def parse_disabled(output):
+    """`pm list packages -d` -> set of disabled packages."""
+    return {
+        line.strip()[len("package:"):]
+        for line in output.splitlines()
+        if line.strip().startswith("package:")
+    }
+
+
+def parse_overlay_allowed(output):
+    """`appops query-op SYSTEM_ALERT_WINDOW allow` -> set of packages.
+
+    Handles both the bare-list form and the `Package com.x:` grouped form.
+    """
+    pkgs = set()
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.match(r"(?:Package\s+)?([a-zA-Z][\w.]*\.[\w.]+):?$", line)
+        if m and "." in m.group(1):
+            pkgs.add(m.group(1))
+    return pkgs
+
+
+def parse_device_admins(output):
+    """`dumpsys device_policy` -> {package: 'package/component'}."""
+    admins = {}
+    for m in re.finditer(r"ComponentInfo\{([\w.]+)/([\w.$]+)\}", output):
+        pkg, comp = m.group(1), m.group(2)
+        admins[pkg] = f"{pkg}/{comp}"
+    return admins
+
+
+_INSTALL_RE = re.compile(r"firstInstallTime=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+
+
+def parse_first_install(dump_text):
+    """Pull firstInstallTime from a `dumpsys package <pkg>` dump."""
+    m = _INSTALL_RE.search(dump_text)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def parse_perms(dump_text):
+    """Return the permission flags of interest present in a package dump."""
+    return {
+        "request_install": "REQUEST_INSTALL_PACKAGES" in dump_text,
+        "accessibility": "BIND_ACCESSIBILITY_SERVICE" in dump_text,
+        "overlay_perm": "SYSTEM_ALERT_WINDOW" in dump_text,  # old-Android fallback
+    }
+
+
+# --- Scoring ----------------------------------------------------------------
+
+def looks_random(package):
+    """Naive gibberish check on package segments.
+    ponytail: heuristic, tune WEIGHTS/here if it mislabels; not a classifier.
+    """
+    for seg in package.split("."):
+        if len(seg) < 8 or not seg.isalnum():
+            continue
+        letters = [c for c in seg.lower() if c.isalpha()]
+        if any(c.isdigit() for c in seg) and letters:
+            return True
+        if letters:
+            vowels = sum(c in "aeiou" for c in letters)
+            if vowels / len(letters) < 0.2:  # ponytail: consonant-heavy = gibberish
+                return True
+    return False
+
+
+def score_app(app, now):
+    """Set app.score/risk/reasons from its signals. `now` is injected for tests."""
+    signals = {
+        "overlay": app.overlay,
+        "sideloaded": app.installer is None,
+        "recent_install": bool(
+            app.first_install and now - app.first_install <= timedelta(days=RECENT_DAYS)
+        ),
+        "device_admin": app.device_admin,
+        "request_install": app.request_install,
+        "accessibility": app.accessibility,
+        "random_name": looks_random(app.package),
+    }
+    app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
+    app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
+
+    spoof = is_spoof(app.package, app.installer, app.is_system)
+    if spoof:
+        app.reasons.insert(0, SPOOF_REASON)
+
+    if spoof or app.score >= HIGH_THRESHOLD:
+        app.risk = "HIGH"
+    elif app.score >= MEDIUM_THRESHOLD:
+        app.risk = "Medium"
+    else:
+        app.risk = "Low"
+    return app
+
+
+# --- Orchestration (thin; device I/O via adb) -------------------------------
+
+def _safe(fn, default=""):
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
+def build_inventory(adb, progress=None, now=None):
+    """Scan the connected device and return scored Apps, highest risk first."""
+    now = now or datetime.now()
+    installers = parse_third_party(_safe(lambda: adb.shell_text(
+        ["pm", "list", "packages", "-3", "-i"])))
+    disabled = parse_disabled(_safe(lambda: adb.shell_text(
+        ["pm", "list", "packages", "-d"])))
+    overlay_allowed = parse_overlay_allowed(_safe(lambda: adb.shell_text(
+        ["appops", "query-op", "SYSTEM_ALERT_WINDOW", "allow"])))
+    admins = parse_device_admins(_safe(lambda: adb.shell_text(
+        ["dumpsys", "device_policy"])))
+
+    apps = []
+    packages = sorted(installers)
+    total = len(packages)
+    for i, pkg in enumerate(packages, 1):
+        if progress:
+            progress(i, total, pkg)
+        dump = _safe(lambda: adb.shell_text(["dumpsys", "package", pkg]))
+        perms = parse_perms(dump)
+        app = App(
+            package=pkg,
+            label=prettify_label(pkg),
+            installer=installers[pkg],
+            enabled=pkg not in disabled,
+            overlay=pkg in overlay_allowed or (
+                not overlay_allowed and perms["overlay_perm"]),
+            device_admin=pkg in admins,
+            admin_component=admins.get(pkg),
+            first_install=parse_first_install(dump),
+            request_install=perms["request_install"],
+            accessibility=perms["accessibility"],
+        )
+        score_app(app, now)
+        apps.append(app)
+
+    apps.sort(key=lambda a: a.score, reverse=True)
+    return apps
+
+
+def demo():
+    now = datetime(2024, 3, 1)
+    # Sideloaded overlay adware installed yesterday -> HIGH.
+    adware = App(package="com.random.freegift", installer=None, overlay=True,
+                 first_install=datetime(2024, 2, 28))
+    score_app(adware, now)
+    assert adware.risk == "HIGH", adware.score
+    assert REASONS["overlay"] in adware.reasons
+    assert REASONS["sideloaded"] in adware.reasons
+
+    # Clean Play Store app -> Low.
+    clean = App(package="com.spotify.music", installer="com.android.vending",
+                first_install=datetime(2020, 1, 1))
+    score_app(clean, now)
+    assert clean.risk == "Low", clean.score
+
+    # Spoofed system name, sideloaded -> forced HIGH with spoof note.
+    spoof = App(package="com.google.android.fakecore", installer=None,
+                first_install=datetime(2020, 1, 1))
+    score_app(spoof, now)
+    assert spoof.risk == "HIGH"
+    assert SPOOF_REASON in spoof.reasons
+    print("scanner.py demo OK")
+
+
+if __name__ == "__main__":
+    demo()

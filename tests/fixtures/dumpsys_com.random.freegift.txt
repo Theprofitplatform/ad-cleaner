@@ -1,0 +1,21 @@
+Packages:
+  Package [com.random.freegift] (a1b2c3):
+    userId=10234
+    pkg=Package{9f8e7d com.random.freegift}
+    codePath=/data/app/~~Zz==/com.random.freegift-Qq==
+    versionCode=1 minSdk=19 targetSdk=28
+    versionName=1.0
+    flags=[ HAS_CODE ]
+    dataDir=/data/user/0/com.random.freegift
+    firstInstallTime=2024-05-20 14:22:10
+    lastUpdateTime=2024-05-20 14:22:10
+    installerPackageName=null
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.SYSTEM_ALERT_WINDOW
+      android.permission.REQUEST_INSTALL_PACKAGES
+      android.permission.RECEIVE_BOOT_COMPLETED
+      android.permission.WAKE_LOCK
+    install permissions:
+      android.permission.SYSTEM_ALERT_WINDOW: granted=true
+      android.permission.REQUEST_INSTALL_PACKAGES: granted=true

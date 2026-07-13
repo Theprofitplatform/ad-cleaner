@@ -1,0 +1,12 @@
+Current Device Policy Manager state:
+  Enabled Device Admins (User 0, provisioningState: 3):
+    Admin: ComponentInfo{com.evil.deviceadmin/com.evil.deviceadmin.AdminReceiver}
+      uid=10199
+      testOnlyAdmin=false
+      policies:
+        limit-password
+        watch-login
+        wipe-data
+        force-lock
+  Removing admin service:
+    (none)

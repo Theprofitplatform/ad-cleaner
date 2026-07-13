@@ -1,0 +1,17 @@
+# Build output
+dist/
+build/
+build_work/
+*.spec
+
+# Bundled ADB (downloaded by build.bat / at first run — not source)
+platform-tools/
+*.zip
+
+# App runtime data
+adcleaner_data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

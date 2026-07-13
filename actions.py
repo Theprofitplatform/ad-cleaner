@@ -1,0 +1,257 @@
+"""Device actions + undo log (BUILD_PLAN 4.3, 4.4, 4.6).
+
+Every action: guard against protected packages -> execute -> verify by
+re-querying device state -> append to the append-only undo log.
+"""
+
+import json
+from datetime import datetime
+from pathlib import Path
+
+from adb import AdbError, data_dir
+from protected import is_protected
+from scanner import parse_disabled
+
+UNDOABLE = {"pause", "uninstall", "block-popup"}
+
+
+class ProtectedAppError(Exception):
+    """Raised on any attempt to act on a protected package (BUILD_PLAN 4.5, AC#7)."""
+
+
+def _guard(app):
+    if is_protected(app.package, app.installer, app.is_system):
+        raise ProtectedAppError(f"{app.package} is a protected system app")
+
+
+# --- Undo log ---------------------------------------------------------------
+
+class ActionLog:
+    def __init__(self, path=None):
+        self.path = Path(path) if path else data_dir() / "action_log.json"
+        self.entries = self._load()
+
+    def _load(self):
+        if self.path.exists():
+            try:
+                return json.loads(self.path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return []
+        return []
+
+    def _save(self):
+        self.path.write_text(json.dumps(self.entries, indent=2), encoding="utf-8")
+
+    def append(self, serial, package, action, previous, command, result):
+        entry = {
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "serial": serial,
+            "package": package,
+            "action": action,
+            "previous": previous,
+            "command": " ".join(command) if isinstance(command, list) else command,
+            "result": result,
+        }
+        self.entries.append(entry)
+        self._save()
+        return entry
+
+    def recent(self):
+        """Newest first."""
+        return list(reversed(self.entries))
+
+
+# --- Verification helpers ---------------------------------------------------
+
+def _is_disabled(adb, package):
+    return package in parse_disabled(adb.shell_text(["pm", "list", "packages", "-d"]))
+
+
+def _is_installed(adb, package):
+    out = adb.shell_text(["pm", "list", "packages"])
+    return any(line.strip() == "package:" + package for line in out.splitlines())
+
+
+# --- Actions ----------------------------------------------------------------
+
+def pause(adb, app, log):
+    """Freeze: `pm disable-user --user 0`. Instant, reversible."""
+    _guard(app)
+    cmd = ["pm", "disable-user", "--user", "0", app.package]
+    adb.shell_text(cmd)
+    ok = _is_disabled(adb, app.package)
+    if ok:
+        app.enabled = False
+    log.append(adb.serial, app.package, "pause", "enabled", cmd, "ok" if ok else "failed")
+    return ok
+
+
+def resume(adb, app, log):
+    """Un-freeze: `pm enable` (falls back to non --user form)."""
+    cmd = ["pm", "enable", "--user", "0", app.package]
+    try:
+        adb.shell_text(cmd)
+    except AdbError:
+        cmd = ["pm", "enable", app.package]
+        adb.shell_text(cmd)
+    ok = not _is_disabled(adb, app.package)
+    if ok:
+        app.enabled = True
+    log.append(adb.serial, app.package, "resume", "paused", cmd, "ok" if ok else "failed")
+    return ok
+
+
+def uninstall(adb, app, log):
+    """Remove for user 0. Auto-strips device-admin first if that blocks it."""
+    _guard(app)
+    cmd = ["pm", "uninstall", "--user", "0", app.package]
+    try:
+        adb.shell_text(cmd)
+    except AdbError:
+        if app.device_admin and app.admin_component:
+            adb.shell_text(["dpm", "remove-active-admin", app.admin_component])
+            adb.shell_text(cmd)  # retry
+        else:
+            raise
+    ok = not _is_installed(adb, app.package)
+    log.append(adb.serial, app.package, "uninstall", app.status, cmd,
+               "ok" if ok else "failed")
+    return ok
+
+
+def stop_all(adb, apps, log, block_popups=False, progress=None):
+    """Force-stop every enabled, non-protected third-party app (BUILD_PLAN 4.3).
+
+    Returns (stopped_count, attempted_count).
+    """
+    targets = [a for a in apps if a.enabled and not a.protected]
+    stopped = 0
+    for i, app in enumerate(targets, 1):
+        try:
+            adb.shell_text(["am", "force-stop", app.package])
+            stopped += 1
+            app.stopped = True
+            log.append(adb.serial, app.package, "force-stop", "running",
+                       ["am", "force-stop", app.package], "ok")
+        except AdbError:
+            log.append(adb.serial, app.package, "force-stop", "running",
+                       ["am", "force-stop", app.package], "failed")
+        if progress:
+            progress(i, len(targets), app.package)
+
+    if block_popups:
+        for app in apps:
+            if app.overlay and not app.protected:
+                cmd = ["appops", "set", app.package, "SYSTEM_ALERT_WINDOW", "deny"]
+                try:
+                    adb.shell_text(cmd)
+                    app.overlay = False
+                    log.append(adb.serial, app.package, "block-popup", "allow", cmd, "ok")
+                except AdbError:
+                    log.append(adb.serial, app.package, "block-popup", "allow", cmd, "failed")
+    return stopped, len(targets)
+
+
+def clean_risky(adb, apps, log, progress=None):
+    """One-click safe clean (used by the big green button).
+
+    Closes every downloaded app, blocks pop-up permissions, then PAUSES every
+    HIGH-risk non-protected app. Everything here is reversible (nothing deleted).
+    Returns {'stopped': n, 'paused': n}.
+    """
+    stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
+    paused = 0
+    for app in apps:
+        if app.risk == "HIGH" and app.enabled and not app.protected:
+            try:
+                if pause(adb, app, log):
+                    paused += 1
+            except (ProtectedAppError, AdbError):
+                pass
+    return {"stopped": stopped, "paused": paused}
+
+
+# --- Undo -------------------------------------------------------------------
+
+def can_undo(entry):
+    return entry.get("action") in UNDOABLE
+
+
+def undo(adb, entry, log):
+    """Reverse a logged action. Returns True on success."""
+    action, pkg = entry["action"], entry["package"]
+    if action == "pause":
+        cmd = ["pm", "enable", "--user", "0", pkg]
+        try:
+            adb.shell_text(cmd)
+        except AdbError:
+            cmd = ["pm", "enable", pkg]
+            adb.shell_text(cmd)
+    elif action == "uninstall":
+        cmd = ["cmd", "package", "install-existing", pkg]
+        adb.shell_text(cmd)
+    elif action == "block-popup":
+        cmd = ["appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"]
+        adb.shell_text(cmd)
+    else:
+        raise AdbError("This action can't be undone.")
+    log.append(adb.serial, pkg, "undo:" + action, entry.get("result"), cmd, "ok")
+    return True
+
+
+def demo():
+    from scanner import App
+
+    class FakeAdb:
+        serial = "TEST"
+
+        def __init__(self):
+            self.disabled = set()
+            self.installed = {"com.random.adware", "com.google.android.gms"}
+
+        def shell_text(self, args, timeout=10):
+            if args[:3] == ["pm", "disable-user", "--user"]:
+                self.disabled.add(args[-1]); return "disabled"
+            if args[:2] == ["pm", "enable"]:
+                self.disabled.discard(args[-1]); return "enabled"
+            if args[:3] == ["pm", "uninstall", "--user"]:
+                self.installed.discard(args[-1]); return "Success"
+            if args[:2] == ["am", "force-stop"]:
+                return ""
+            if args == ["pm", "list", "packages", "-d"]:
+                return "".join(f"package:{p}\n" for p in self.disabled)
+            if args == ["pm", "list", "packages"]:
+                return "".join(f"package:{p}\n" for p in self.installed)
+            return ""
+
+    import tempfile
+    log = ActionLog(Path(tempfile.mkdtemp()) / "log.json")
+    adb = FakeAdb()
+
+    adware = App(package="com.random.adware", installer=None, overlay=True)
+    protected = App(package="com.google.android.gms", installer="com.android.vending")
+
+    # Protected app can never be paused / uninstalled / stopped.
+    for fn in (pause, uninstall):
+        try:
+            fn(adb, protected, log)
+            assert False, "protected app was actioned!"
+        except ProtectedAppError:
+            pass
+    assert "com.google.android.gms" in adb.installed  # untouched
+
+    # Adware pauses, verifies, and undoes.
+    assert pause(adb, adware, log) is True
+    assert adware.enabled is False
+    assert undo(adb, log.recent()[0], log) is True
+    assert "com.random.adware" not in adb.disabled
+
+    # stop_all skips the protected app, hits only the running third-party one.
+    running = App(package="com.random.adware", installer=None, enabled=True)
+    stopped, attempted = stop_all(adb, [running, protected], log)
+    assert attempted == 1 and stopped == 1, (stopped, attempted)
+    print("actions.py demo OK")
+
+
+if __name__ == "__main__":
+    demo()

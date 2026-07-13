@@ -1,0 +1,4 @@
+package:com.spotify.music  installer=com.android.vending
+package:com.random.freegift  installer=null
+package:com.evil.deviceadmin  installer=null
+package:com.google.android.fakecore  installer=null

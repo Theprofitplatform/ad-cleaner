@@ -1,0 +1,150 @@
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+import scanner
+from scanner import (
+    App, build_inventory, looks_random, parse_device_admins, parse_disabled,
+    parse_first_install, parse_overlay_allowed, parse_perms, parse_third_party,
+    prettify_label, score_app,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+NOW = datetime(2024, 6, 1)
+
+
+def fx(name):
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+class FakeAdb:
+    """Serves canned fixture output for the commands build_inventory issues."""
+    serial = "FIXTURE"
+
+    def shell_text(self, args, timeout=10):
+        if args == ["pm", "list", "packages", "-3", "-i"]:
+            return fx("packages_i.txt")
+        if args == ["pm", "list", "packages", "-d"]:
+            return fx("disabled.txt")
+        if args == ["appops", "query-op", "SYSTEM_ALERT_WINDOW", "allow"]:
+            return fx("appops_overlay.txt")
+        if args == ["dumpsys", "device_policy"]:
+            return fx("device_policy.txt")
+        if args[:2] == ["dumpsys", "package"]:
+            return fx(f"dumpsys_{args[2]}.txt")
+        return ""
+
+
+# --- Parser tests -----------------------------------------------------------
+
+def test_parse_third_party():
+    got = parse_third_party(fx("packages_i.txt"))
+    assert got["com.spotify.music"] == "com.android.vending"
+    assert got["com.random.freegift"] is None  # installer=null -> None
+    assert len(got) == 4
+
+
+def test_parse_disabled():
+    assert parse_disabled(fx("disabled.txt")) == {"com.oldstuff.calc"}
+
+
+def test_parse_overlay_allowed_bare_list():
+    assert parse_overlay_allowed(fx("appops_overlay.txt")) == {"com.random.freegift"}
+
+
+def test_parse_overlay_allowed_grouped_form():
+    grouped = "Uid 10234:\n  Package com.foo.bar:\n    SYSTEM_ALERT_WINDOW: allow\n"
+    assert parse_overlay_allowed(grouped) == {"com.foo.bar"}
+
+
+def test_parse_device_admins():
+    admins = parse_device_admins(fx("device_policy.txt"))
+    assert admins == {
+        "com.evil.deviceadmin": "com.evil.deviceadmin/com.evil.deviceadmin.AdminReceiver"
+    }
+
+
+def test_parse_first_install():
+    dt = parse_first_install(fx("dumpsys_com.random.freegift.txt"))
+    assert dt == datetime(2024, 5, 20, 14, 22, 10)
+    assert parse_first_install("no date here") is None
+
+
+def test_parse_perms():
+    perms = parse_perms(fx("dumpsys_com.random.freegift.txt"))
+    assert perms["request_install"] and perms["overlay_perm"]
+    assert not perms["accessibility"]
+    admin_perms = parse_perms(fx("dumpsys_com.evil.deviceadmin.txt"))
+    assert admin_perms["accessibility"]
+
+
+# --- Label + heuristic tests ------------------------------------------------
+
+def test_prettify_label():
+    assert prettify_label("com.foo.flashlight") == "Flashlight (com.foo.flashlight)"
+
+
+@pytest.mark.parametrize("pkg", ["com.a.xkwptqzr", "com.a.a8f3k2j9x"])
+def test_looks_random_true(pkg):
+    assert looks_random(pkg)
+
+
+@pytest.mark.parametrize("pkg", ["com.spotify.music", "com.foo.flashlight", "com.whatsapp"])
+def test_looks_random_false(pkg):
+    assert not looks_random(pkg)
+
+
+# --- Scoring tests (BUILD_PLAN 4.2 table) -----------------------------------
+
+def test_overlay_plus_sideloaded_both_listed_high():
+    """Acceptance #3: overlay + sideloaded app is HIGH with both reasons."""
+    app = App(package="com.random.freegift", installer=None, overlay=True,
+              first_install=datetime(2024, 5, 20))
+    score_app(app, NOW)
+    assert app.risk == "HIGH"
+    assert scanner.REASONS["overlay"] in app.reasons
+    assert scanner.REASONS["sideloaded"] in app.reasons
+
+
+def test_clean_store_app_low():
+    app = App(package="com.spotify.music", installer="com.android.vending",
+              first_install=datetime(2020, 1, 15))
+    score_app(app, NOW)
+    assert app.risk == "Low" and app.score == 0
+
+
+def test_spoof_forced_high_even_with_low_score():
+    app = App(package="com.google.android.fakecore", installer=None,
+              first_install=datetime(2019, 3, 3))
+    score_app(app, NOW)
+    assert app.risk == "HIGH"
+    assert scanner.SPOOF_REASON == app.reasons[0]
+
+
+def test_threshold_boundaries():
+    # Exactly medium threshold.
+    app = App(package="com.x.y", installer=None, first_install=datetime(2024, 5, 20))
+    score_app(app, NOW)  # sideloaded 25 + recent 15 = 40
+    assert app.score == 40 and app.risk == "Medium"
+
+
+# --- End-to-end inventory over fixtures -------------------------------------
+
+def test_build_inventory_scores_whole_device():
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert apps["com.spotify.music"].risk == "Low"
+    assert apps["com.random.freegift"].risk == "HIGH"
+    assert apps["com.evil.deviceadmin"].risk == "HIGH"
+    assert apps["com.evil.deviceadmin"].device_admin
+    assert apps["com.evil.deviceadmin"].admin_component.endswith("AdminReceiver")
+    assert apps["com.google.android.fakecore"].risk == "HIGH"
+    # Highest risk sorts first.
+    ordered = build_inventory(FakeAdb(), now=NOW)
+    assert ordered[0].score >= ordered[-1].score
+
+
+def test_build_inventory_marks_overlay_from_appops():
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert apps["com.random.freegift"].overlay
+    assert not apps["com.spotify.music"].overlay

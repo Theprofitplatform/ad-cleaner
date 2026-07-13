@@ -284,5 +284,5 @@ def test_clear_private_dns_turns_off(log):
     adb = FakeAdb()
     set_private_dns(adb, "dns.adguard.com", log)
     assert clear_private_dns(adb, log) is True
-    assert read_private_dns(adb)[0] == "off"
+    assert read_private_dns(adb) == ("off", "")
     assert log.entries[-1]["action"] == "clear-dns"

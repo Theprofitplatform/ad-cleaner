@@ -270,7 +270,7 @@ def read_private_dns(adb):
         mode = "off"
     if host in ("", "null"):
         host = ""
-    return mode, host
+    return mode, (host if mode == "hostname" else "")
 
 
 def set_private_dns(adb, hostname, log):

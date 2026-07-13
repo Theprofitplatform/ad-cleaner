@@ -33,6 +33,7 @@ class FakeAdb:
         self.calls = []
         self.rebooted = False
         self.png = TINY_PNG
+        self.globals = {}
 
     def start_server(self):
         pass
@@ -65,6 +66,10 @@ class FakeAdb:
             return "package:/data/app/x/base.apk\n"
         if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
             return ""
+        if args[:3] == ["settings", "get", "global"]:
+            return self.globals.get(args[3], "null")
+        if args[:3] == ["settings", "put", "global"]:
+            self.globals[args[3]] = args[4]; return ""
         if args[:2] in (["am", "force-stop"], ["appops", "set"], ["settings", "put"]):
             return ""
         if args == ["pm", "list", "packages", "-d"]:
@@ -253,3 +258,17 @@ def test_shop_mode_auto_cleans_on_scan(root, monkeypatch, tmp_path):
     pump(root, 1.0)
     assert "com.random.adware" in app.adb.disabled
     assert "com.google.android.gms" not in app.adb.disabled
+
+
+def test_dns_toggle_sets_and_clears(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.dns_provider.set("AdGuard — blocks ads + trackers")
+    app.on_dns_on()
+    pump(root, 0.6)
+    assert app.adb.globals.get("private_dns_mode") == "hostname"
+    assert app.adb.globals.get("private_dns_specifier") == "dns.adguard.com"
+    app.on_dns_off()
+    pump(root, 0.6)
+    assert app.adb.globals.get("private_dns_mode") == "off"

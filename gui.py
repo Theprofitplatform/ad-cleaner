@@ -5,12 +5,13 @@ Tk main thread through a queue (Tkinter is not thread-safe). The UI never
 freezes and never crashes on an ADB failure -- errors land in the status bar.
 """
 
+import json
 import queue
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from adb import Adb, AdbError, find_adb
+from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, ProtectedAppError, can_undo, clean_risky, clear_caches, pause, resume,
     stop_all, undo, uninstall,
@@ -31,12 +32,20 @@ HEADER_MUTED = "#94a3b8"
 GREEN, GREEN_HOT = "#16a34a", "#15803d"
 RED, RED_HOT = "#dc2626", "#b91c1c"
 SLATE, SLATE_HOT = "#334155", "#475569"
+AMBER, AMBER_HOT = "#d97706", "#b45309"
 BTN_OFF = "#cbd5e1"    # disabled button background
 RISK_BG = {"HIGH": "#fee2e2", "Medium": "#fef3c7", "Low": "#ffffff"}
 RISK_FG = {"HIGH": "#991b1b", "Medium": "#92400e", "Low": INK}
+RISK_DOT = {"HIGH": "🔴", "Medium": "🟠", "Low": "🟢"}  # colour-independent risk cue
 DOT = {"grey": "#94a3b8", "orange": "#f59e0b", "green": "#22c55e"}
+# Verdict-banner tints: kind -> (background, foreground).
+BANNER = {"info": (PANEL, SLATE), "warn": ("#fef3c7", "#92400e"),
+          "alert": ("#fee2e2", "#991b1b"), "good": ("#dcfce7", "#166534")}
+STATUS_FG = {"info": INK, "good": GREEN_HOT, "error": RED}
 COLUMNS = ("app", "package", "risk", "why", "installed", "source", "status")
-HEADINGS = ("App name", "Package", "Risk", "Why flagged", "Installed", "Source", "Status")
+HEADINGS = ("App name", "App ID", "Risk", "Why flagged", "Installed", "Source", "Status")
+# Show plain-English columns first (name, verdict, reason); techie ones trail.
+DISPLAY = ("app", "risk", "why", "status", "installed", "source", "package")
 SUSPICIOUS = {"HIGH", "Medium"}
 
 STOP_ALL_MSG = ("This will close every downloaded app on the phone.\n\n"
@@ -115,8 +124,10 @@ class AdCleanerApp:
         self.alive = True
         self.busy = False
         self._pending_clean = False
-        self.shop_mode = tk.BooleanVar(value=False)
-        self.uninstall_mode = tk.BooleanVar(value=False)  # False = pause, True = remove
+        self._settings = self._load_settings()
+        self.shop_mode = tk.BooleanVar(value=self._settings.get("shop_mode", False))
+        self.uninstall_mode = tk.BooleanVar(
+            value=self._settings.get("uninstall_mode", False))  # False=pause, True=remove
 
         self._build_ui()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -146,6 +157,24 @@ class AdCleanerApp:
     def _run_bg(self, fn):
         threading.Thread(target=fn, daemon=True).start()
 
+    # --- remembered settings (Shop mode / Uninstall mode / phone brand) -----
+
+    def _load_settings(self):
+        try:
+            return json.loads((data_dir() / "settings.json").read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_settings(self):
+        try:
+            (data_dir() / "settings.json").write_text(json.dumps({
+                "shop_mode": self.shop_mode.get(),
+                "uninstall_mode": self.uninstall_mode.get(),
+                "brand": self.brand_var.get(),
+            }, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     # --- theme + buttons ----------------------------------------------------
 
     def _apply_theme(self):
@@ -160,7 +189,8 @@ class AdCleanerApp:
         st.configure("TFrame", background=BASE)
         st.configure("TLabel", background=BASE, foreground=INK)
         st.configure("Muted.TLabel", background=BASE, foreground=MUTED)
-        st.configure("Status.TLabel", background=PANEL, foreground=MUTED)
+        # Status bar carries every outcome + error, so keep it dark and legible.
+        st.configure("Status.TLabel", background=PANEL, foreground=INK, font=(FONT, 11))
         st.configure("Header.TFrame", background=HEADER_BG)
         st.configure("Header.TLabel", background=HEADER_BG, foreground=HEADER_INK,
                      font=(FONT, 11, "bold"))
@@ -171,6 +201,8 @@ class AdCleanerApp:
         st.configure("Panel.TLabel", background=PANEL, foreground=INK)
         st.configure("PanelMuted.TLabel", background=PANEL, foreground=MUTED)
         st.configure("PanelWarn.TLabel", background=PANEL, foreground=RED)
+        st.configure("PanelInfo.TLabel", background=PANEL, foreground=SLATE)
+        st.configure("PanelAmber.TLabel", background=PANEL, foreground=AMBER_HOT)
         st.configure("TCheckbutton", background=BASE)
         st.map("TCheckbutton", background=[("active", BASE)])
         st.configure("TButton", font=(FONT, 10), padding=(10, 6))
@@ -235,11 +267,16 @@ class AdCleanerApp:
                                            GREEN, GREEN_HOT, font=(FONT, 12, "bold"),
                                            padx=16, pady=8)
         self.clean_btn.grid(row=0, column=6, padx=(0, 8))
+        # Secondary/emergency action — kept slate so the green CLEAN button is the
+        # single loud call to action (red is reserved for the destructive confirm).
         self.stop_btn = self._flat_button(header, "⏹  STOP ALL", self.on_stop_all,
-                                          RED, RED_HOT)
+                                          SLATE, SLATE_HOT)
         self.stop_btn.grid(row=0, column=7)
         for b in (self.rescan_btn, self.clean_btn, self.stop_btn):
             self._enable_btn(b, False)
+        # Make CLEAN say what it will actually do (pause vs. permanently remove).
+        self.uninstall_mode.trace_add("write", lambda *_: self._sync_clean_label())
+        self._sync_clean_label()
 
         self._build_wizard()
 
@@ -270,24 +307,35 @@ class AdCleanerApp:
         ttk.Checkbutton(bar, text="Show risky apps only", variable=self.suspicious_var,
                         command=self._render_table).pack(side="left", padx=12)
         ttk.Checkbutton(bar, text="🔁  Shop mode (auto-clean each phone)",
-                        variable=self.shop_mode).pack(side="right", padx=8)
+                        variable=self.shop_mode,
+                        command=self._toggle_shop).pack(side="right", padx=8)
         ttk.Checkbutton(bar, text="🗑  Uninstall the junk (instead of pausing)",
-                        variable=self.uninstall_mode).pack(side="right", padx=8)
+                        variable=self.uninstall_mode,
+                        command=self._save_settings).pack(side="right", padx=8)
         self.progress = ttk.Progressbar(bar, mode="determinate", length=220)
+
+        self.summary = tk.Label(tab, text="", anchor="w", font=(FONT, 11, "bold"),
+                                bg=BASE, fg=MUTED, padx=10, pady=7)
+        self.summary.pack(fill="x", padx=6, pady=(2, 0))
+        self._show_summary(None)
 
         mid = ttk.Frame(tab)
         mid.pack(fill="both", expand=True, padx=6)
         self.tree = ttk.Treeview(mid, columns=COLUMNS, show="headings", selectmode="browse")
-        widths = (210, 230, 88, 250, 96, 150, 84)
+        widths = (200, 180, 74, 210, 88, 120, 80)  # fits the default window; 'why' flexes
         for col, head, w in zip(COLUMNS, HEADINGS, widths):
             self.tree.heading(col, text=head)
-            self.tree.column(col, width=w, anchor="w")
+            self.tree.column(col, width=w, anchor="w", stretch=(col == "why"))
         for risk in RISK_BG:
             self.tree.tag_configure(risk, background=RISK_BG[risk], foreground=RISK_FG[risk])
         vsb = ttk.Scrollbar(mid, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
+        hsb = ttk.Scrollbar(mid, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        mid.rowconfigure(0, weight=1)
+        mid.columnconfigure(0, weight=1)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
         detail = ttk.Frame(tab, style="Panel.TFrame", padding=14)
@@ -341,6 +389,7 @@ class AdCleanerApp:
 
         self.dev_vars = {k: tk.StringVar(value="—")
                          for k in ("storage", "ram", "temp", "battery")}
+        self.dev_labels = {}
         grid = ttk.Frame(tab)
         grid.pack(anchor="w")
         rows = [("💾  Storage", "storage"), ("🧠  Memory (RAM)", "ram"),
@@ -348,8 +397,9 @@ class AdCleanerApp:
         for i, (label, key) in enumerate(rows):
             ttk.Label(grid, text=label, font=(FONT, 11, "bold")).grid(
                 row=i, column=0, sticky="w", padx=(0, 24), pady=6)
-            ttk.Label(grid, textvariable=self.dev_vars[key], font=(FONT, 11)).grid(
-                row=i, column=1, sticky="w", pady=6)
+            lbl = ttk.Label(grid, textvariable=self.dev_vars[key], font=(FONT, 11))
+            lbl.grid(row=i, column=1, sticky="w", pady=6)
+            self.dev_labels[key] = lbl
 
         btns = ttk.Frame(tab)
         btns.pack(anchor="w", pady=(18, 0))
@@ -403,8 +453,9 @@ class AdCleanerApp:
                 brow.pack(fill="x", padx=36, pady=(2, 0))
                 ttk.Label(brow, text="Which phone?", style="PanelMuted.TLabel").pack(
                     side="left", padx=(0, 8))
-                self.brand_var = tk.StringVar(value="Other / not sure")
-                ttk.OptionMenu(brow, self.brand_var, "Other / not sure",
+                self.brand_var = tk.StringVar(
+                    value=self._settings.get("brand", "Other / not sure"))
+                ttk.OptionMenu(brow, self.brand_var, self.brand_var.get(),
                                *BRAND_STEPS, command=lambda *_: self._show_brand()).pack(
                     side="left")
                 self.brand_help = ttk.Label(
@@ -415,6 +466,7 @@ class AdCleanerApp:
 
     def _show_brand(self):
         self.brand_help.config(text=BRAND_STEPS[self.brand_var.get()])
+        self._save_settings()
 
     def _mark_steps(self, current, done=0):
         for i, icon in enumerate(self.step_icons):
@@ -598,6 +650,7 @@ class AdCleanerApp:
             self.status_line("Phone disconnected.")
             self.apps = []
             self._render_table()
+            self._show_summary(None)
             self._clear_detail()
 
     # --- scanning -----------------------------------------------------------
@@ -634,6 +687,7 @@ class AdCleanerApp:
         has_high = any(a.risk == "HIGH" for a in apps)
         self.suspicious_var.set(has_high)
         self._render_table()
+        self._show_summary(apps)
         highs = sum(a.risk == "HIGH" for a in apps)
         self.status_line(f"Scan complete: {len(apps)} downloaded apps, {highs} high-risk.")
         if self._pending_clean:
@@ -670,11 +724,29 @@ class AdCleanerApp:
         self.tree.delete(*self.tree.get_children())
         for a in self._visible_apps():
             installed = a.first_install.strftime("%Y-%m-%d") if a.first_install else ""
-            why = ", ".join(a.reasons)
+            why = (a.reasons[0] + (f"   +{len(a.reasons) - 1} more"
+                                   if len(a.reasons) > 1 else "")) if a.reasons else ""
             name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
             self.tree.insert("", "end", iid=a.package, tags=(a.risk,),
-                             values=(name, a.package, a.risk, why,
+                             values=(name, a.package, f"{a.risk} ({a.score})", why,
                                      installed, a.source, a.status))
+
+    def _show_summary(self, apps):
+        if not apps:
+            self.summary.config(text="", bg=BASE)
+            return
+        highs = sum(a.risk == "HIGH" for a in apps)
+        meds = sum(a.risk == "Medium" for a in apps)
+        if highs + meds == 0:
+            self.summary.config(text="✅  No risky apps found — this phone looks clean.",
+                                bg="#dcfce7", fg="#166534")
+            return
+        parts = ([f"{highs} HIGH"] if highs else []) + ([f"{meds} Medium"] if meds else [])
+        self.summary.config(
+            text=f"⚠️  {highs + meds} risky app(s) found  ({', '.join(parts)})  —  "
+                 "press CLEAN MY PHONE.",
+            bg="#fee2e2" if highs else "#fef3c7",
+            fg="#991b1b" if highs else "#92400e")
 
     def _app_by_pkg(self, pkg):
         return next((a for a in self.apps if a.package == pkg), None)
@@ -696,7 +768,7 @@ class AdCleanerApp:
         if not a:
             self._clear_detail()
             return
-        self.detail_title.config(text=f"{a.label}  —  Risk: {a.risk}")
+        self.detail_title.config(text=f"{a.label}  —  Risk: {a.risk} ({a.score})")
         if a.protected:
             self.detail_reasons.config(text="🔒 Protected system app — this one is kept safe "
                                             "and cannot be changed.")
@@ -801,20 +873,22 @@ class AdCleanerApp:
         self._start_clean()
 
     def _start_clean(self):
-        n = sum(a.risk in SUSPICIOUS and not a.protected for a in self.apps)
+        risky = [a for a in self.apps if a.risk in SUSPICIOUS and not a.protected]
+        n = len(risky)
         remove = self.uninstall_mode.get()
-        if remove:
-            act_line = f"     •  Uninstall the {n} junk / pop-up app(s) it found"
-            note = "Removed apps can be restored later from the History tab."
-        else:
-            act_line = f"     •  Pause the {n} junk / pop-up app(s) it found"
-            note = "Nothing is deleted — you can undo anything from the History tab."
+        verb = "Uninstall" if remove else "Pause"
+        note = ("Removed apps can be restored later from the History tab." if remove
+                else "Nothing is deleted — you can undo anything from the History tab.")
+        names = "\n".join("     •  " + a.label.split(" (")[0] for a in risky[:8])
+        if n > 8:
+            names += f"\n     •  …and {n - 8} more"
+        if not names:
+            names = "     (none — just closing apps and blocking pop-ups)"
         if not messagebox.askyesno(
                 "Clean this phone",
-                "Ad Cleaner will now:\n\n"
-                "     •  Close every downloaded app\n"
-                "     •  Block pop-up ads on all of them\n"
-                f"{act_line}\n\n"
+                "Ad Cleaner will now close every downloaded app, block pop-ups, and\n"
+                f"{verb.lower()} these {n} junk / pop-up app(s):\n\n"
+                f"{names}\n\n"
                 f"{note}\n\n"
                 "Go ahead?  (press Enter for Yes)",
                 default="yes"):
@@ -847,6 +921,7 @@ class AdCleanerApp:
             self.selected = None
         self._refresh_history()
         self._render_table()
+        self._show_summary(self.apps)
         self._update_detail()
         verb = "removed" if res["removed"] else "paused"
         summary = f"Closed {res['stopped']} app(s) and {verb} {res['acted']} risky one(s)."
@@ -882,15 +957,39 @@ class AdCleanerApp:
         self._run_bg(work)
 
     def _show_device(self, s):
-        self.dev_vars["storage"].set(
-            f"{s['storage_used_gb']} GB used of {s['storage_total_gb']} GB   "
-            f"({s['storage_free_gb']} GB free)")
-        self.dev_vars["ram"].set(
-            f"{s['ram_used_gb']} GB used of {s['ram_total_gb']} GB   ({s['ram_pct']}%)")
-        self.dev_vars["temp"].set(
-            f"{s['battery_temp_c']} °C" if s["battery_temp_c"] is not None else "—")
+        AMBER, RED_T, OK = "#b45309", "#b91c1c", INK
+
+        def paint(key, color):
+            self.dev_labels[key].config(foreground=color)
+
+        if s["storage_total_gb"]:
+            self.dev_vars["storage"].set(
+                f"{s['storage_used_gb']} GB used of {s['storage_total_gb']} GB   "
+                f"({s['storage_free_gb']} GB free)")
+            paint("storage", RED_T if s["storage_pct"] > 95
+                  else AMBER if s["storage_pct"] > 85 else OK)
+        else:
+            self.dev_vars["storage"].set("— couldn't read")
+            paint("storage", MUTED)
+
+        if s["ram_total_gb"]:
+            self.dev_vars["ram"].set(
+                f"{s['ram_used_gb']} GB used of {s['ram_total_gb']} GB   ({s['ram_pct']}%)")
+            paint("ram", RED_T if s["ram_pct"] > 95 else AMBER if s["ram_pct"] > 90 else OK)
+        else:
+            self.dev_vars["ram"].set("— couldn't read")
+            paint("ram", MUTED)
+
+        if s["battery_temp_c"] is not None:
+            self.dev_vars["temp"].set(f"{s['battery_temp_c']} °C")
+            paint("temp", RED_T if s["battery_temp_c"] > 45
+                  else AMBER if s["battery_temp_c"] > 40 else OK)
+        else:
+            self.dev_vars["temp"].set("— couldn't read")
+            paint("temp", MUTED)
+
         self.dev_vars["battery"].set(
-            f"{s['battery_level']}%" if s["battery_level"] is not None else "—")
+            f"{s['battery_level']}%" if s["battery_level"] is not None else "— couldn't read")
 
     def on_clear_caches(self):
         if self.busy or not self.serial:
@@ -984,11 +1083,23 @@ class AdCleanerApp:
 
     # --- history / undo -----------------------------------------------------
 
+    FRIENDLY_ACTION = {
+        "pause": "Paused", "resume": "Resumed", "uninstall": "Uninstalled",
+        "force-stop": "Closed", "block-popup": "Blocked pop-ups",
+        "clear-cache": "Cleared caches",
+    }
+
     def _refresh_history(self):
         self.hist.delete(*self.hist.get_children())
+        self.hist.tag_configure("failed", foreground=RED)
         for i, e in enumerate(self.log.recent()):
-            self.hist.insert("", "end", iid=str(i),
-                             values=(e["time"], e["package"], e["action"], e["result"]))
+            act = e["action"]
+            label = (self.FRIENDLY_ACTION.get(act)
+                     or ("Undid " + self.FRIENDLY_ACTION.get(act[5:], act[5:]).lower()
+                         if act.startswith("undo:") else act))
+            tags = ("failed",) if e.get("result") == "failed" else ()
+            self.hist.insert("", "end", iid=str(i), tags=tags,
+                             values=(e["time"], e["package"], label, e["result"]))
 
     def on_undo(self):
         sel = self.hist.selection()

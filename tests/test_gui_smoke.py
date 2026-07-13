@@ -39,10 +39,14 @@ class FakeAdb:
     def shell_text(self, args, timeout=10):
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return ""
+        if args[:3] == ["pm", "uninstall", "--user"]:
+            self.installed.discard(args[-1]); return "Success"
         if args[:2] in (["am", "force-stop"], ["appops", "set"]):
             return ""
         if args == ["pm", "list", "packages", "-d"]:
             return "".join(f"package:{p}\n" for p in self.disabled)
+        if args == ["pm", "list", "packages"]:
+            return "".join(f"package:{p}\n" for p in self.installed)
         return ""
 
 
@@ -146,6 +150,19 @@ def test_one_click_clean(root, monkeypatch, tmp_path):
     pump(root, 1.0)
     assert "com.random.adware" in app.adb.disabled       # risky app paused
     assert "com.google.android.gms" not in app.adb.disabled  # protected untouched
+
+
+def test_uninstall_mode_removes_apps(root, monkeypatch, tmp_path):
+    """With the uninstall toggle on, clean removes risky apps and drops them."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.uninstall_mode.set(True)
+    app.on_clean()
+    pump(root, 1.0)
+    assert "com.random.adware" not in app.adb.installed        # uninstalled
+    assert "com.google.android.gms" in app.adb.installed       # protected kept
+    assert app._app_by_pkg("com.random.adware") is None         # dropped from list
 
 
 def test_shop_mode_auto_cleans_on_scan(root, monkeypatch, tmp_path):

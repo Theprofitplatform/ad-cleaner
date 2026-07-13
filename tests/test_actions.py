@@ -146,10 +146,22 @@ def test_clean_risky_stops_all_and_pauses_suspicious(log):
     # stop_all hits all non-protected enabled apps; protected excluded.
     assert res["stopped"] == 3
     # HIGH and Medium get paused; Low and protected do not.
-    assert res["paused"] == 2
+    assert res["acted"] == 2 and res["removed"] is False
     assert "com.random.adware" in adb.disabled
     assert "com.play.cleaner" in adb.disabled
     assert "com.google.android.gms" not in adb.disabled
+
+
+def test_clean_risky_remove_uninstalls_suspicious(log):
+    adb = FakeAdb()
+    adware = App(package="com.random.adware", installer=None, overlay=True, risk="HIGH")
+    protected = App(package="com.google.android.gms", installer="com.android.vending",
+                    risk="HIGH")  # protected -> never removed
+    res = clean_risky(adb, [adware, protected], log, remove=True)
+    assert res["removed"] is True and res["acted"] == 1
+    assert res["packages"] == ["com.random.adware"]
+    assert "com.random.adware" not in adb.installed   # actually uninstalled
+    assert "com.google.android.gms" in adb.installed  # protected left alone
 
 
 def test_log_is_appended_and_persisted(tmp_path):

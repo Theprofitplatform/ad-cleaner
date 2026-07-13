@@ -155,24 +155,32 @@ def stop_all(adb, apps, log, block_popups=False, progress=None):
 SUSPICIOUS = ("HIGH", "Medium")
 
 
-def clean_risky(adb, apps, log, progress=None):
-    """One-click safe clean (used by the big green button).
+def clean_risky(adb, apps, log, progress=None, remove=False):
+    """One-click clean (used by the big green button / Shop mode).
 
-    Closes every downloaded app, blocks pop-up permissions on all of them, then
-    PAUSES every suspicious (HIGH or Medium) non-protected app -- Medium catches
-    the Play-Store "cleaner/booster" pop-up apps that aren't sideloaded.
-    Everything here is reversible (nothing deleted). Returns {'stopped','paused'}.
+    Closes every downloaded app and blocks pop-up permissions on all of them,
+    then acts on every suspicious (HIGH or Medium) non-protected app -- Medium
+    catches the Play-Store "cleaner/booster" pop-up apps that aren't sideloaded.
+
+    remove=False -> PAUSE the apps (reversible, nothing deleted).
+    remove=True  -> UNINSTALL them (restorable via History / install-existing).
+
+    Returns {'stopped', 'acted', 'removed': bool, 'packages': [acted-on pkgs]}.
     """
     stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
-    paused = 0
+    acted = []
     for app in apps:
-        if app.risk in SUSPICIOUS and app.enabled and not app.protected:
-            try:
-                if pause(adb, app, log):
-                    paused += 1
-            except (ProtectedAppError, AdbError):
-                pass
-    return {"stopped": stopped, "paused": paused}
+        if app.risk not in SUSPICIOUS or app.protected:
+            continue
+        try:
+            if remove:
+                if uninstall(adb, app, log):
+                    acted.append(app.package)
+            elif app.enabled and pause(adb, app, log):
+                acted.append(app.package)
+        except (ProtectedAppError, AdbError):
+            pass
+    return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted}
 
 
 # --- Undo -------------------------------------------------------------------

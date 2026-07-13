@@ -4,8 +4,9 @@ import pytest
 
 import actions
 from actions import (
-    ActionLog, ProtectedAppError, can_undo, clean_risky, clear_caches, pause, resume,
-    stop_all, undo, uninstall,
+    ActionLog, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
+    disable_accessibility, pause, reboot, reset_app_data, resume, stop_all, undo,
+    uninstall,
 )
 from scanner import App
 
@@ -17,10 +18,32 @@ class FakeAdb:
         self.disabled = set()
         self.installed = {"com.random.adware", "com.evil.admin", "com.google.android.gms"}
         self.admin_active = {"com.evil.admin"} if admin_blocks else set()
+        self.a11y = ""
+        self.pulled = []
+        self.rebooted = False
         self.calls = []
+
+    def pull(self, remote, local, timeout=120):
+        self.pulled.append((remote, local))
+        Path(local).write_text("apk")
+        return "pulled"
+
+    def reboot(self, timeout=10):
+        self.rebooted = True
+        return ""
 
     def shell_text(self, args, timeout=10):
         self.calls.append(args)
+        if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
+            return self.a11y
+        if args[:4] == ["settings", "put", "secure", "enabled_accessibility_services"]:
+            self.a11y = args[4]; return ""
+        if args[:4] == ["settings", "put", "secure", "accessibility_enabled"]:
+            return ""
+        if args[:3] == ["pm", "clear", "--user"]:
+            return "Success"
+        if args[:2] == ["pm", "path"]:
+            return "package:/data/app/~~x/base.apk\n"
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return "disabled"
         if args[:2] == ["pm", "enable"]:
@@ -162,6 +185,56 @@ def test_clean_risky_remove_uninstalls_suspicious(log):
     assert res["packages"] == ["com.random.adware"]
     assert "com.random.adware" not in adb.installed   # actually uninstalled
     assert "com.google.android.gms" in adb.installed  # protected left alone
+
+
+def test_disable_accessibility_removes_only_target(log):
+    adb = FakeAdb()
+    adb.a11y = "com.evil.admin/.Svc:com.good.reader/.Svc"
+    assert disable_accessibility(adb, "com.evil.admin", log) is True
+    assert adb.a11y == "com.good.reader/.Svc"
+
+
+def test_disable_accessibility_last_one_sets_null(log):
+    adb = FakeAdb()
+    adb.a11y = "com.evil.admin/.Svc"
+    disable_accessibility(adb, "com.evil.admin", log)
+    assert adb.a11y == "null"
+
+
+def test_uninstall_neutralises_accessibility_first(log):
+    adb = FakeAdb()
+    adb.a11y = "com.evil.admin/.Svc"
+    app = App(package="com.evil.admin", installer=None, active_accessibility=True)
+    assert uninstall(adb, app, log) is True
+    assert adb.a11y == "null"                      # turned off before removal
+    assert "com.evil.admin" not in adb.installed
+
+
+def test_reset_app_data(log):
+    adb = FakeAdb()
+    app = App(package="com.random.adware", installer=None)
+    assert reset_app_data(adb, app, log) is True
+    assert ["pm", "clear", "--user", "0", "com.random.adware"] in adb.calls
+
+
+def test_reset_app_data_protected_raises(log):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        reset_app_data(adb, PROTECTED, log)
+
+
+def test_backup_apk_pulls_to_dest(tmp_path):
+    adb = FakeAdb()
+    app = App(package="com.random.adware", installer=None)
+    saved = backup_apk(adb, app, tmp_path)
+    assert len(saved) == 1 and saved[0].endswith("com.random.adware.apk")
+    assert adb.pulled and Path(saved[0]).exists()
+
+
+def test_reboot(log):
+    adb = FakeAdb()
+    assert reboot(adb, log) is True
+    assert adb.rebooted
 
 
 def test_clear_caches_runs_and_logs(log):

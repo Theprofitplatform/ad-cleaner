@@ -12,26 +12,38 @@ from protected import is_protected, is_spoof
 
 # --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
 WEIGHTS = {
-    "overlay": 40,          # allowed to draw over other apps (the popup mechanism)
-    "sideloaded": 25,       # installer is null or not a known store
-    "hidden": 20,           # installed but has no icon in the app drawer
-    "recent_install": 15,   # first installed within RECENT_DAYS
-    "device_admin": 20,     # active device administrator
-    "request_install": 10,  # holds REQUEST_INSTALL_PACKAGES
-    "accessibility": 10,    # holds a BIND_ACCESSIBILITY_SERVICE grant
-    "sensitive_data": 10,   # can read SMS / call log / contacts
-    "random_name": 10,      # package name has a random-looking segment
+    "overlay": 40,             # allowed to draw over other apps (the popup mechanism)
+    "sideloaded": 25,          # installer is null or not a known store
+    "active_accessibility": 25,  # accessibility service is switched ON (controls phone)
+    "hidden": 20,              # installed but has no icon in the app drawer
+    "device_admin": 20,        # active device administrator
+    "recent_install": 15,      # first installed within RECENT_DAYS
+    "role_hijack": 15,         # took over a system default (home/browser/sms/dialer)
+    "request_install": 10,     # holds REQUEST_INSTALL_PACKAGES
+    "accessibility": 10,       # holds a BIND_ACCESSIBILITY_SERVICE grant (declared only)
+    "sensitive_data": 10,      # can read SMS / call log / contacts
+    "random_name": 10,         # package name has a random-looking segment
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
     "sideloaded": "Installed from outside an app store (sideloaded)",
+    "active_accessibility": "Accessibility control is switched ON (can tap/read the screen)",
     "hidden": "Hidden — no icon in the app drawer",
-    "recent_install": "Installed in the last 30 days",
     "device_admin": "Is a device administrator",
+    "recent_install": "Installed in the last 30 days",
+    "role_hijack": "Took over a system default",
     "request_install": "Can install other apps",
     "accessibility": "Uses accessibility access",
     "sensitive_data": "Can read your texts, calls, or contacts",
     "random_name": "Has a random-looking package name",
+}
+
+# Android role -> plain-English name (BUILD_PLAN risk mgmt). cmd role holders <role>.
+ROLES = {
+    "android.app.role.HOME": "home screen",
+    "android.app.role.BROWSER": "browser",
+    "android.app.role.SMS": "text messages",
+    "android.app.role.DIALER": "phone dialer",
 }
 
 # Sensitive permissions shown in the detail pane (BUILD_PLAN 4.2 / risk mgmt).
@@ -73,6 +85,8 @@ class App:
     hidden: bool = False              # no launcher icon on the phone
     sensitive_data: bool = False      # can read SMS / calls / contacts
     sensitive_perms: list = field(default_factory=list)  # human-readable perm labels
+    active_accessibility: bool = False   # accessibility service is enabled (not just declared)
+    hijacked_roles: list = field(default_factory=list)   # role names it holds (home/browser/…)
     stopped: bool = False             # transient: force-stopped this session
     score: int = 0
     risk: str = "Low"
@@ -185,6 +199,23 @@ def parse_launcher_packages(output):
     return {m.group(1) for m in re.finditer(r"([\w.]+)/[\w.$]+", output)}
 
 
+def parse_enabled_accessibility(output):
+    """`settings get secure enabled_accessibility_services` -> set of packages.
+
+    Value is 'pkg1/svc1:pkg2/svc2' or 'null'/empty when none are enabled.
+    """
+    out = (output or "").strip()
+    if not out or out == "null":
+        return set()
+    return {seg.split("/")[0] for seg in out.split(":") if "/" in seg}
+
+
+def parse_role_holders(output):
+    """`cmd role holders <role>` -> list of holder packages (one per line)."""
+    return [ln.strip() for ln in (output or "").splitlines()
+            if ln.strip() and "." in ln and " " not in ln.strip()]
+
+
 # --- Scoring ----------------------------------------------------------------
 
 def looks_random(package):
@@ -218,9 +249,14 @@ def score_app(app, now):
         "accessibility": app.accessibility,
         "sensitive_data": app.sensitive_data,
         "random_name": looks_random(app.package),
+        "active_accessibility": app.active_accessibility,
+        "role_hijack": bool(app.hijacked_roles),
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
+    if app.hijacked_roles:  # name the specific defaults it seized
+        detail = "Took over a system default (" + ", ".join(app.hijacked_roles) + ")"
+        app.reasons = [detail if r == REASONS["role_hijack"] else r for r in app.reasons]
 
     spoof = is_spoof(app.package, app.installer, app.is_system)
     if spoof:
@@ -260,6 +296,13 @@ def build_inventory(adb, progress=None, now=None):
          "-a", "android.intent.action.MAIN",
          "-c", "android.intent.category.LAUNCHER"])))
     have_launchers = bool(launchers)  # skip hidden-detection if the query failed
+    a11y_on = parse_enabled_accessibility(_safe(lambda: adb.shell_text(
+        ["settings", "get", "secure", "enabled_accessibility_services"])))
+    role_owner = {}  # package -> [role names it holds]
+    for role, friendly in ROLES.items():
+        for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
+                ["cmd", "role", "holders", role]))):
+            role_owner.setdefault(pkg, []).append(friendly)
 
     apps = []
     packages = sorted(installers)
@@ -284,6 +327,8 @@ def build_inventory(adb, progress=None, now=None):
             hidden=have_launchers and pkg not in launchers,
             sensitive_data=perms["sensitive_data"],
             sensitive_perms=perms["sensitive_perms"],
+            active_accessibility=pkg in a11y_on,
+            hijacked_roles=role_owner.get(pkg, []),
         )
         score_app(app, now)
         apps.append(app)

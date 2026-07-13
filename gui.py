@@ -314,18 +314,23 @@ class AdCleanerApp:
                         command=self._save_settings).pack(side="right", padx=8)
         self.progress = ttk.Progressbar(bar, mode="determinate", length=220)
 
-        self.summary = tk.Label(tab, text="", anchor="w", font=(FONT, 11, "bold"),
-                                bg=BASE, fg=MUTED, padx=10, pady=7)
+        self.summary = tk.Label(tab, text="", anchor="w", font=(FONT, 12, "bold"),
+                                bg=BASE, fg=MUTED, padx=12, pady=9)
         self.summary.pack(fill="x", padx=6, pady=(2, 0))
         self._show_summary(None)
 
         mid = ttk.Frame(tab)
         mid.pack(fill="both", expand=True, padx=6)
-        self.tree = ttk.Treeview(mid, columns=COLUMNS, show="headings", selectmode="browse")
-        widths = (200, 180, 74, 210, 88, 120, 80)  # fits the default window; 'why' flexes
+        # displaycolumns puts plain-English columns first (name, risk, why); the
+        # techie App ID / Source trail behind so a nervous user reads meaning first.
+        self.tree = ttk.Treeview(mid, columns=COLUMNS, displaycolumns=DISPLAY,
+                                 show="headings", selectmode="browse")
+        widths = (190, 150, 112, 240, 92, 120, 84)  # COLUMNS order; 'why' flexes
         for col, head, w in zip(COLUMNS, HEADINGS, widths):
             self.tree.heading(col, text=head)
             self.tree.column(col, width=w, anchor="w", stretch=(col == "why"))
+        self.tree_empty = ttk.Label(mid, style="Muted.TLabel", anchor="center",
+                                    font=(FONT, 12), justify="center")
         for risk in RISK_BG:
             self.tree.tag_configure(risk, background=RISK_BG[risk], foreground=RISK_FG[risk])
         vsb = ttk.Scrollbar(mid, orient="vertical", command=self.tree.yview)
@@ -341,7 +346,7 @@ class AdCleanerApp:
         detail = ttk.Frame(tab, style="Panel.TFrame", padding=14)
         detail.pack(fill="x", padx=6, pady=(8, 2))
         ttk.Label(detail, text="DETAILS", style="PanelMuted.TLabel",
-                  font=(FONT, 8, "bold")).pack(anchor="w")
+                  font=(FONT, 10, "bold")).pack(anchor="w")
         self.detail_title = ttk.Label(detail, text="Select an app to see details.",
                                       style="Panel.TLabel", font=(FONT, 12, "bold"))
         self.detail_title.pack(anchor="w", pady=(2, 0))
@@ -351,7 +356,7 @@ class AdCleanerApp:
         btns = ttk.Frame(detail, style="PanelFlat.TFrame")
         btns.pack(anchor="w")
         self.pause_btn = self._flat_button(btns, "⏸  Pause", self.on_pause,
-                                           "#d97706", "#b45309")
+                                           AMBER, AMBER_HOT)
         self.resume_btn = self._flat_button(btns, "▶  Resume", self.on_resume,
                                             SLATE, SLATE_HOT)
         self.uninstall_btn = self._flat_button(btns, "🗑  Uninstall", self.on_uninstall,
@@ -359,6 +364,11 @@ class AdCleanerApp:
         for b in (self.pause_btn, self.resume_btn, self.uninstall_btn):
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
+
+        ttk.Label(tab, style="Muted.TLabel", wraplength=980, justify="left",
+                  text="Risk score — higher means more likely junk.    "
+                       "🔴 HIGH: remove it     🟠 Medium: worth a look     "
+                       "🟢 Low: probably fine.").pack(anchor="w", padx=10, pady=(6, 0))
 
     def _build_history_tab(self, nb):
         tab = ttk.Frame(nb, padding=(4, 6))
@@ -432,8 +442,9 @@ class AdCleanerApp:
         ttk.Label(self.wizard, text="📱  Let's connect your phone", style="Panel.TLabel",
                   font=(FONT, 15, "bold")).pack(anchor="w")
         self.wiz_status = tk.StringVar(value="Looking for your phone…")
-        ttk.Label(self.wizard, textvariable=self.wiz_status, style="PanelWarn.TLabel",
-                  font=(FONT, 12, "bold")).pack(anchor="w", pady=(3, 12))
+        self.wiz_status_lbl = ttk.Label(self.wizard, textvariable=self.wiz_status,
+                                        style="PanelInfo.TLabel", font=(FONT, 12, "bold"))
+        self.wiz_status_lbl.pack(anchor="w", pady=(3, 12))
 
         steps = [
             "Turn on “USB debugging” on the phone",
@@ -480,9 +491,11 @@ class AdCleanerApp:
         if not self.wizard.winfo_manager():
             self.wizard.pack(fill="x", padx=10, pady=(8, 2), before=self.notebook)
         if state == "unauthorized":
+            self.wiz_status_lbl.config(style="PanelAmber.TLabel")
             self.wiz_status.set("Almost there!  Now tap “Allow” on the phone screen.")
             self._mark_steps(current=2, done=2)
         else:  # searching
+            self.wiz_status_lbl.config(style="PanelInfo.TLabel")
             self.wiz_status.set("Looking for your phone…  plug it in with a USB cable.")
             self._mark_steps(current=0, done=0)
 
@@ -684,12 +697,12 @@ class AdCleanerApp:
         self.progress.pack_forget()
         if self.serial:
             self._enable_btn(self.rescan_btn, True)
-        has_high = any(a.risk == "HIGH" for a in apps)
-        self.suspicious_var.set(has_high)
+        risky = sum(a.risk in SUSPICIOUS for a in apps)
+        self.suspicious_var.set(risky > 0)   # auto-focus the risky ones if any exist
         self._render_table()
         self._show_summary(apps)
-        highs = sum(a.risk == "HIGH" for a in apps)
-        self.status_line(f"Scan complete: {len(apps)} downloaded apps, {highs} high-risk.")
+        self.status_line(f"Scan complete: {len(apps)} downloaded apps, {risky} flagged.",
+                         "good" if risky == 0 else "info")
         if self._pending_clean:
             self._pending_clean = False
             self._start_clean()
@@ -697,15 +710,16 @@ class AdCleanerApp:
             if any(a.risk in SUSPICIOUS and not a.protected for a in apps):
                 self._start_clean()
             else:
+                self._set_summary("✅  Clean — unplug and connect the next phone.", "good")
                 self.status_line("✅ Nothing risky found — this phone looks clean. "
-                                 "Unplug and connect the next one.")
+                                 "Unplug and connect the next one.", "good")
 
     def _scan_failed(self, err):
         self.busy = False
         self.progress.pack_forget()
         if self.serial:
             self._enable_btn(self.rescan_btn, True)
-        self.status_line("Scan failed: " + err)
+        self.status_line("Couldn't scan. " + self._friendly(err), "error")
 
     # --- table + detail -----------------------------------------------------
 
@@ -727,26 +741,51 @@ class AdCleanerApp:
             why = (a.reasons[0] + (f"   +{len(a.reasons) - 1} more"
                                    if len(a.reasons) > 1 else "")) if a.reasons else ""
             name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
+            risk = f"{RISK_DOT.get(a.risk, '')} {a.risk} ({a.score})"
             self.tree.insert("", "end", iid=a.package, tags=(a.risk,),
-                             values=(name, a.package, f"{a.risk} ({a.score})", why,
+                             values=(name, a.package, risk, why,
                                      installed, a.source, a.status))
+        # Never leave a blank grid — a clean phone must not look like a failure.
+        if self.tree.get_children():
+            self.tree_empty.place_forget()
+        else:
+            self.tree_empty.config(text=self._empty_message())
+            self.tree_empty.place(relx=0.5, rely=0.4, anchor="center")
+
+    def _set_summary(self, text, kind):
+        """Verdict banner above the table. `text` empty -> clear it."""
+        if not text:
+            self.summary.config(text="", bg=BASE, fg=MUTED)
+            return
+        bg, fg = BANNER[kind]
+        self.summary.config(text=text, bg=bg, fg=fg)
 
     def _show_summary(self, apps):
         if not apps:
-            self.summary.config(text="", bg=BASE)
+            self._set_summary("", None)
             return
         highs = sum(a.risk == "HIGH" for a in apps)
         meds = sum(a.risk == "Medium" for a in apps)
         if highs + meds == 0:
-            self.summary.config(text="✅  No risky apps found — this phone looks clean.",
-                                bg="#dcfce7", fg="#166534")
+            self._set_summary("✅  No risky apps found — this phone looks clean.", "good")
             return
         parts = ([f"{highs} HIGH"] if highs else []) + ([f"{meds} Medium"] if meds else [])
-        self.summary.config(
-            text=f"⚠️  {highs + meds} risky app(s) found  ({', '.join(parts)})  —  "
-                 "press CLEAN MY PHONE.",
-            bg="#fee2e2" if highs else "#fef3c7",
-            fg="#991b1b" if highs else "#92400e")
+        verb = "uninstall" if self.uninstall_mode.get() else "pause"
+        self._set_summary(
+            f"⚠️  {highs + meds} risky app(s) found  ({', '.join(parts)})  —  "
+            f"press CLEAN MY PHONE to {verb} them.",
+            "alert" if highs else "warn")
+
+    def _empty_message(self):
+        if self.busy:
+            return "Checking this phone…"
+        if not self.serial:
+            return "No phone connected — follow the steps above to connect it."
+        if self.filter_var.get().strip():
+            return "No apps match your search."
+        if self.suspicious_var.get():
+            return "Good news — no risky apps found on this phone. 🎉"
+        return "No downloaded apps found.\nPress 🔄 Rescan to check again."
 
     def _app_by_pkg(self, pkg):
         return next((a for a in self.apps if a.package == pkg), None)
@@ -802,7 +841,8 @@ class AdCleanerApp:
         if not a:
             return
         if not messagebox.askyesno("Pause app", f"Freeze \"{a.label}\"?\n\n"
-                                                 "It stops running until you press Resume."):
+                                   "It stops running until you press Resume.",
+                                   default="no"):
             return
         self._do_action(lambda: pause(self.adb, a, self.log), a, "Paused")
 
@@ -819,7 +859,8 @@ class AdCleanerApp:
         if not messagebox.askyesno(
                 "Uninstall app",
                 f"Remove \"{a.label}\" from the phone?\n\n"
-                "It is removed for you but can be restored later from the History tab."):
+                "It is removed for you but can be restored later from the History tab.",
+                default="no"):
             return
         self._do_action(lambda: uninstall(self.adb, a, self.log), a, "Uninstalled",
                         removes=True)
@@ -848,13 +889,13 @@ class AdCleanerApp:
             self.status_line("Blocked: that app is protected.")
             return
         if err:
-            self.status_line(f"Couldn't finish: {err}")
+            self.status_line("Couldn't finish. " + self._friendly(err), "error")
             self._update_detail()
             return
         if not ok:
-            self.status_line(f"{verb}? The phone didn't confirm the change.")
+            self.status_line(f"{verb}? The phone didn't confirm the change.", "error")
         else:
-            self.status_line(f"{verb}: {app.label.split(' (')[0]}.")
+            self.status_line(f"{verb}: {app.label.split(' (')[0]}.", "good")
             if removes:
                 self.apps = [a for a in self.apps if a.package != app.package]
                 self.selected = None
@@ -884,7 +925,7 @@ class AdCleanerApp:
             names += f"\n     •  …and {n - 8} more"
         if not names:
             names = "     (none — just closing apps and blocking pop-ups)"
-        if not messagebox.askyesno(
+        if not self.shop_mode.get() and not messagebox.askyesno(
                 "Clean this phone",
                 "Ad Cleaner will now close every downloaded app, block pop-ups, and\n"
                 f"{verb.lower()} these {n} junk / pop-up app(s):\n\n"
@@ -913,7 +954,8 @@ class AdCleanerApp:
         self.busy = False
         if err:
             self._refresh_history()
-            self.status_line("Clean failed: " + err)
+            self.status_line("Couldn't finish cleaning. " + self._friendly(err), "error")
+            messagebox.showwarning("Couldn't finish", self._friendly(err))
             return
         if res["removed"]:  # drop the uninstalled apps from the list
             gone = set(res["packages"])
@@ -921,15 +963,21 @@ class AdCleanerApp:
             self.selected = None
         self._refresh_history()
         self._render_table()
-        self._show_summary(self.apps)
         self._update_detail()
         verb = "removed" if res["removed"] else "paused"
         summary = f"Closed {res['stopped']} app(s) and {verb} {res['acted']} risky one(s)."
         if self.shop_mode.get():
-            # Hands-off: no modal to dismiss, just a clear cue for the next phone.
-            self.status_line(f"✅ Cleaned — {summary}  Unplug and connect the next phone.")
+            # Hands-off: a loud on-screen cue (+ chime) for the next phone; no modal.
+            self._set_summary("✅  DONE — unplug and connect the next phone.", "good")
+            try:
+                self.root.bell()
+            except tk.TclError:
+                pass
+            self.status_line(f"✅ Cleaned — {summary}  Unplug and connect the next phone.",
+                             "good")
             return
-        self.status_line(f"✅ Done! {summary} Your phone should be usable now.")
+        self._set_summary(f"✅  Done — {summary}", "good")
+        self.status_line(f"✅ Done! {summary} Your phone should be usable now.", "good")
         messagebox.showinfo(
             "All done",
             f"{summary}\n\n"
@@ -1020,12 +1068,12 @@ class AdCleanerApp:
         self.busy = False
         self._refresh_history()
         if err:
-            self.status_line("Couldn't clear caches: " + err)
+            self.status_line("Couldn't clear caches. " + self._friendly(err), "error")
             return
         if stats:
             self._show_device(stats)
         self.status_line(f"✅ Caches cleared. Freed about {freed} GB." if freed > 0
-                         else "✅ Caches cleared.")
+                         else "✅ Caches cleared.", "good")
 
     # --- STOP ALL -----------------------------------------------------------
 
@@ -1063,10 +1111,13 @@ class AdCleanerApp:
         result = {"go": False}
         row = ttk.Frame(win, padding=12)
         row.pack()
-        ttk.Button(row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        cancel = ttk.Button(row, text="Cancel", command=win.destroy)
+        cancel.pack(side="left", padx=6)
         ttk.Button(row, text="Yes, stop all",
                    command=lambda: (result.update(go=True), win.destroy())).pack(
             side="left", padx=6)
+        win.bind("<Escape>", lambda e: win.destroy())   # Esc = cancel
+        cancel.focus_set()                              # safe default on a disruptive action
         win.wait_window()
         return result["go"], block_var.get()
 
@@ -1135,8 +1186,40 @@ class AdCleanerApp:
         self._draw_dot(color)
         self.status_var.set(text)
 
-    def status_line(self, text):
-        self.statusbar.config(text=text)
+    def status_line(self, text, kind="info"):
+        self.statusbar.config(text=text, foreground=STATUS_FG.get(kind, INK))
+
+    def _friendly(self, err):
+        """Turn a raw ADB error into one plain sentence with a next step."""
+        e = (err or "").lower()
+        if any(k in e for k in ("offline", "no devices", "not found", "disconnect",
+                                "closed", "device '", "cannot connect", "device offline")):
+            return ("The phone disconnected. Re-plug the USB cable, wait for the green "
+                    "light at the top, then try again.")
+        if "unauthorized" in e:
+            return "Tap “Allow” on the phone screen, then try again."
+        return "Something went wrong. Re-plug the phone and press 🔄 Rescan."
+
+    def _toggle_shop(self):
+        """Confirm hands-off cleaning once when Shop mode is switched on."""
+        self._save_settings()
+        if not self.shop_mode.get():
+            return
+        act = ("uninstalled (restorable from the History tab)" if self.uninstall_mode.get()
+               else "paused (fully reversible)")
+        if not messagebox.askyesno(
+                "Turn on Shop mode?",
+                "Shop mode cleans each phone automatically the moment it's scanned, "
+                "with no further prompts.\n\n"
+                f"Risky apps will be {act}.\n\n"
+                "Turn it on?", default="yes"):
+            self.shop_mode.set(False)
+            self._save_settings()
+
+    def _sync_clean_label(self):
+        """Keep the CLEAN button honest about what it will do."""
+        self.clean_btn.config(text="🗑  CLEAN & REMOVE" if self.uninstall_mode.get()
+                              else "✨  CLEAN MY PHONE")
 
     def _on_close(self):
         self.alive = False

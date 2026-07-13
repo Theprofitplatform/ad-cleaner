@@ -6,8 +6,9 @@ import pytest
 import scanner
 from scanner import (
     App, build_inventory, looks_random, parse_device_admins, parse_disabled,
-    parse_first_install, parse_launcher_packages, parse_overlay_allowed, parse_perms,
-    parse_third_party, prettify_label, score_app,
+    parse_enabled_accessibility, parse_first_install, parse_launcher_packages,
+    parse_overlay_allowed, parse_perms, parse_role_holders, parse_third_party,
+    prettify_label, score_app,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -112,6 +113,34 @@ def test_sensitive_data_scored():
     score_app(app, NOW)
     assert scanner.REASONS["sensitive_data"] in app.reasons
     assert app.score == 10
+
+
+def test_parse_enabled_accessibility():
+    assert parse_enabled_accessibility("com.a/.S:com.b/.T") == {"com.a", "com.b"}
+    assert parse_enabled_accessibility("null") == set()
+    assert parse_enabled_accessibility("") == set()
+
+
+def test_parse_role_holders():
+    assert parse_role_holders("com.foo.browser\n") == ["com.foo.browser"]
+    assert parse_role_holders("No holders.") == []
+    assert parse_role_holders("") == []
+
+
+def test_active_accessibility_scored():
+    app = App(package="com.evil.x", installer=None, active_accessibility=True,
+              first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert scanner.REASONS["active_accessibility"] in app.reasons
+    assert app.score == 50  # sideloaded 25 + active_accessibility 25
+
+
+def test_role_hijack_scored_with_named_defaults():
+    app = App(package="com.evil.home", installer=None,
+              hijacked_roles=["home screen", "browser"], first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert any("Took over a system default (home screen, browser)" in r for r in app.reasons)
+    assert app.score == 40  # sideloaded 25 + role_hijack 15
 
 
 # --- Label + heuristic tests ------------------------------------------------

@@ -96,6 +96,32 @@ class Adb:
     def get_prop(self, prop, timeout=DEFAULT_TIMEOUT):
         return self.shell_text(["getprop", prop], timeout).strip()
 
+    def run_bytes(self, args, timeout=DEFAULT_TIMEOUT):
+        """Like run() but returns raw stdout bytes (for binary output)."""
+        try:
+            proc = subprocess.run(self._cmd(args), capture_output=True,
+                                  timeout=timeout, creationflags=_NO_WINDOW)
+        except subprocess.TimeoutExpired:
+            raise AdbError(f"Command timed out after {timeout}s")
+        except FileNotFoundError:
+            raise AdbError("adb.exe not found")
+        if proc.returncode != 0:
+            raise AdbError(_friendly((proc.stderr or b"").decode("utf-8", "ignore")))
+        return proc.stdout
+
+    def screencap(self, timeout=20):
+        """Return a PNG screenshot of the phone screen as bytes.
+
+        `exec-out` (not `shell`) keeps the binary stream free of CRLF mangling.
+        """
+        return self.run_bytes(["exec-out", "screencap", "-p"], timeout=timeout)
+
+    def pull(self, remote, local, timeout=120):
+        return self.run(["pull", remote, local], timeout=timeout)
+
+    def reboot(self, timeout=DEFAULT_TIMEOUT):
+        return self.run(["reboot"], timeout=timeout)
+
 
 def parse_devices(output):
     devices = []

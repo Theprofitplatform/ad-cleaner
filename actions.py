@@ -102,8 +102,13 @@ def resume(adb, app, log):
 
 
 def uninstall(adb, app, log):
-    """Remove for user 0. Auto-strips device-admin first if that blocks it."""
+    """Remove for user 0. Auto-neutralises accessibility + device-admin first."""
     _guard(app)
+    if getattr(app, "active_accessibility", False):
+        try:
+            disable_accessibility(adb, app.package, log)  # stop it re-granting/blocking
+        except AdbError:
+            pass
     cmd = ["pm", "uninstall", "--user", "0", app.package]
     try:
         adb.shell_text(cmd)
@@ -181,6 +186,57 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
         except (ProtectedAppError, AdbError):
             pass
     return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted}
+
+
+def disable_accessibility(adb, package, log=None):
+    """Switch OFF an app's accessibility service so it can't block its own removal.
+
+    Reads the enabled list, drops the offender's entries, writes the rest back
+    (shell holds WRITE_SECURE_SETTINGS — no root). Returns True on success.
+    """
+    cur = adb.shell_text(["settings", "get", "secure", "enabled_accessibility_services"])
+    kept = [s for s in (cur or "").strip().split(":")
+            if s and s != "null" and not s.startswith(package + "/")]
+    value = ":".join(kept) if kept else "null"
+    adb.shell_text(["settings", "put", "secure", "enabled_accessibility_services", value])
+    if not kept:
+        adb.shell_text(["settings", "put", "secure", "accessibility_enabled", "0"])
+    if log is not None:
+        log.append(adb.serial, package, "disable-accessibility", "on",
+                   ["settings", "put", "secure", "enabled_accessibility_services"], "ok")
+    return True
+
+
+def reset_app_data(adb, app, log):
+    """Wipe an app's data (`pm clear`) — fixes hijacked browser/launcher without removing it."""
+    _guard(app)
+    cmd = ["pm", "clear", "--user", "0", app.package]
+    adb.shell_text(cmd)
+    log.append(adb.serial, app.package, "reset-data", app.status, cmd, "ok")
+    return True
+
+
+def backup_apk(adb, app, dest_dir):
+    """Pull the app's APK(s) to dest_dir before removal. Returns saved file paths."""
+    out = adb.shell_text(["pm", "path", app.package])
+    remotes = [ln.strip()[len("package:"):] for ln in out.splitlines()
+               if ln.strip().startswith("package:")]
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for i, remote in enumerate(remotes):
+        name = app.package + (".apk" if i == 0 else f"-split{i}.apk")
+        local = str(dest / name)
+        adb.pull(remote, local)
+        saved.append(local)
+    return saved
+
+
+def reboot(adb, log=None):
+    adb.reboot()
+    if log is not None:
+        log.append(adb.serial, "(device)", "reboot", "-", ["reboot"], "ok")
+    return True
 
 
 def clear_caches(adb, log=None):

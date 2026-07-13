@@ -171,8 +171,9 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
     remove=False -> PAUSE the apps (reversible, nothing deleted).
     remove=True  -> UNINSTALL them (restorable via History / install-existing).
 
-    Returns {'stopped', 'acted', 'removed': bool, 'packages': [acted-on pkgs]}.
+    Returns {'stopped', 'acted', 'removed': bool, 'packages': [acted-on pkgs], 'popups_blocked': int}.
     """
+    popups = sum(1 for a in apps if a.overlay and not a.protected)   # before stop_all clears overlay
     stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
     acted = []
     for app in apps:
@@ -186,7 +187,7 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
                 acted.append(app.package)
         except (ProtectedAppError, AdbError):
             pass
-    return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted}
+    return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted, "popups_blocked": popups}
 
 
 def disable_accessibility(adb, package, log=None):

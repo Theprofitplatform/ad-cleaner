@@ -422,3 +422,12 @@ def test_device_tab_shows_top_battery_drainer(root, monkeypatch, tmp_path):
     app = gui.AdCleanerApp(root)
     pump(root, 1.5)
     assert "mAh" in app.dev_vars["top_drainer"].get()
+
+
+def test_battery_health_zero_shows_no_data(root, monkeypatch, tmp_path):
+    """When battery health is 0 (uncalibrated), show no-data indicator, not '0%'."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app._show_battery_report({"top_drainers": [], "health_pct": 0})
+    assert app.dev_vars["battery_health"].get() == "—"

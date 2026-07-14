@@ -1691,7 +1691,7 @@ class AdCleanerApp:
         self.battery_report = report
         health = report["health_pct"]
         self.dev_vars["battery_health"].set(
-            f"{health}% of original capacity" if health is not None else "—")
+            f"{health}% of original capacity" if health else "—")
         top = report["top_drainers"]
         self.dev_vars["top_drainer"].set(
             f"{top[0][0]} ({top[0][1]:g} mAh since last charge)" if top else "—")

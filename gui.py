@@ -123,24 +123,32 @@ TRANSFER_FOLDERS = ("DCIM", "Pictures", "Movies", "Music", "Download", "Document
 # take minutes; adb buffers its own progress so we only report totals at the end.
 # If users want a live bar, stream `adb pull` stderr instead of capturing it.
 TRANSFER_TIMEOUT = 3600
+# Written into a save folder only after every folder pulled cleanly; its absence
+# means the save was interrupted (crash, cable, timeout) and may be partial.
+TRANSFER_DONE_MARK = ".complete"
 
 
 def _pull_media(adb, dest):
     """Copy the standard user folders off the phone into `dest`.
 
-    Returns (saved, skipped) folder-name lists. A folder that isn't on this
-    phone just raises AdbError and is skipped — not an error.
+    Returns (saved, skipped, failed) folder-name lists. A folder that isn't on
+    this phone is skipped — not an error. Any OTHER failure (cable pulled,
+    timeout, disk full) lands in `failed`; a failed folder may be PARTIALLY
+    copied on disk, so callers must never report success while `failed` is
+    non-empty — a tech may wipe the old phone on that signal.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
-    saved, skipped = [], []
+    saved, skipped, failed = [], [], []
     for name in TRANSFER_FOLDERS:
         try:
             adb.pull(REMOTE_BASE + name, str(dest), timeout=TRANSFER_TIMEOUT)
             saved.append(name)
-        except AdbError:
-            skipped.append(name)
-    return saved, skipped
+        except AdbError as e:
+            # adb's message for a missing remote folder is
+            # "remote object '/sdcard/X' does not exist" — anything else is real.
+            (skipped if "does not exist" in str(e).lower() else failed).append(name)
+    return saved, skipped, failed
 
 
 def _push_media(adb, src):
@@ -624,20 +632,32 @@ class AdCleanerApp:
 
         def work():
             try:
-                saved, skipped = _pull_media(self.adb, dest)
-                self._post(self._move_save_done, dest, saved, None)
+                saved, skipped, failed = _pull_media(self.adb, dest)
+                if not failed:
+                    (dest / TRANSFER_DONE_MARK).write_text("ok", encoding="utf-8")
+                self._post(self._move_save_done, dest, saved, failed, None)
             except Exception as e:
-                self._post(self._move_save_done, dest, [], str(e))
+                self._post(self._move_save_done, dest, [], [], str(e))
 
         self._run_bg(work)
 
-    def _move_save_done(self, dest, saved, err):
+    def _move_save_done(self, dest, saved, failed, err):
         self.busy = False
         for b in self.move_btns:
             self._enable_btn(b, bool(self.serial))
         if err:
             self.move_status.set("")
             self.status_line("Couldn't save the files. " + self._friendly(err), "error")
+            return
+        if failed:
+            # Partial save: never show the ✅ a tech would wipe the old phone on.
+            self.move_status.set(
+                f"⚠ Couldn't finish — {', '.join(failed)} did not copy"
+                + (f" ({', '.join(saved)} did)" if saved else "") + ".\n"
+                "Do NOT wipe or trade in the old phone yet. Check the cable and "
+                "press Save again — a fresh folder will be made.")
+            self.status_line("Saving did not finish. Check the cable and try again.",
+                             "error")
             return
         if not saved:
             self.move_status.set("Nothing was found to copy on this phone.")
@@ -661,10 +681,27 @@ class AdCleanerApp:
             if not chosen:
                 return
             src = Path(chosen)
+        # Guard the picker path: a Step-1 folder only ever contains the standard
+        # folder names. Picking the transfers/ ROOT (every past customer's saves)
+        # or some random huge folder must not end up on the phone.
+        try:
+            subdirs = [d.name for d in src.iterdir() if d.is_dir()]
+        except OSError:
+            subdirs = []
+        if not subdirs or any(name not in TRANSFER_FOLDERS for name in subdirs):
+            messagebox.showwarning(
+                "Pick the saved folder",
+                "That doesn't look like a folder saved in Step 1.\n\n"
+                "Open the “transfers” folder and pick ONE of the dated folders "
+                "inside it (the name starts with the old phone's model).")
+            return
+        warn = ("" if (src / TRANSFER_DONE_MARK).exists() else
+                "\n\n⚠ This save may not have finished — some files could be missing.")
         if not messagebox.askyesno(
                 "Copy onto the new phone",
-                f"Copy the photos and files from\n\n{src}\n\nonto the phone plugged in "
-                "now?\n\nMake sure this is the NEW phone.", default="yes"):
+                f"Copy the photos and files from\n\n{src}\n\nonto "
+                f"“{self.model or self.serial}” (the phone plugged in now)?\n\n"
+                f"Make sure this is the NEW phone.{warn}", default="yes"):
             return
         self.busy = True
         for b in self.move_btns:
@@ -698,6 +735,8 @@ class AdCleanerApp:
             return
         note = (f"  ⚠ Couldn't copy: {', '.join(failed)} — press Copy again to retry."
                 if failed else "")
+        if not failed:
+            self._last_transfer_dir = None  # done; next customer gets the picker
         self.move_status.set(f"✅ Copied {', '.join(pushed)} onto the new phone.{note} "
                              "Open the Gallery on the phone to check your photos.")
         self.status_line(f"✅ Copied {len(pushed)} folder(s) onto the new phone.",

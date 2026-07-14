@@ -223,6 +223,26 @@ def test_bulk_uninstall_multi_select(root, monkeypatch, tmp_path):
     assert app._app_by_pkg("com.junk.one") is None
 
 
+def test_bulk_confirm_calls_out_safe_apps(root, monkeypatch, tmp_path):
+    # Select all with the risky filter off ticks EVERYTHING; the confirm must
+    # say how many of the selection look safe so a one-click wipe is visible.
+    _wire(gui, monkeypatch, tmp_path)
+    seen = {}
+    monkeypatch.setattr(gui.messagebox, "askyesno",
+                        lambda title, msg, **k: seen.update(msg=msg) or False)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.apps = [App(package="com.junk.one", installer=None, risk="HIGH"),
+                App(package="com.whatsapp", installer="com.android.vending", risk="Low")]
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.on_select_all()
+    pump(root, 0.1)
+    app.on_uninstall()          # askyesno returns False -> nothing is removed
+    assert "1 of these look SAFE" in seen["msg"]
+    assert app._app_by_pkg("com.whatsapp") is not None
+
+
 def test_select_all_then_bulk_pause(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

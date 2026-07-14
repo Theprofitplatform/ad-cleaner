@@ -6,9 +6,9 @@ import actions
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
     clear_private_dns, disable_accessibility, pause, read_private_dns, reboot, reset_app_data,
-    resume, set_private_dns, stop_all, undo, uninstall,
+    resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
-from scanner import App
+from scanner import App, REASONS
 
 
 class FakeAdb:
@@ -178,6 +178,24 @@ def test_clean_risky_stops_all_and_pauses_suspicious(log):
     assert "com.random.adware" in adb.disabled
     assert "com.play.cleaner" in adb.disabled
     assert "com.google.android.gms" not in adb.disabled
+
+
+def test_clean_risky_skips_nuisance_name_only_medium(log):
+    # A Medium whose ONLY evidence is a junk-looking name (AVG's real package id
+    # is com.antivirus) must never be auto-cleaned -- it stays flagged for a
+    # human. A Medium with a corroborating signal is still cleaned.
+    adb = FakeAdb()
+    name_only = App(package="com.phone.cleaner", installer="com.android.vending",
+                    risk="Medium", reasons=[REASONS["nuisance"]])
+    corroborated = App(package="com.junk.cleaner", installer="com.android.vending",
+                       overlay=True, risk="Medium",
+                       reasons=[REASONS["nuisance"], REASONS["overlay"]])
+    assert not will_clean(name_only)
+    assert will_clean(corroborated)
+    res = clean_risky(adb, [name_only, corroborated], log)
+    assert res["acted"] == 1
+    assert "com.junk.cleaner" in adb.disabled
+    assert "com.phone.cleaner" not in adb.disabled
 
 
 def test_clean_risky_remove_uninstalls_suspicious(log):

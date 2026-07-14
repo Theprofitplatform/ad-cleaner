@@ -44,6 +44,35 @@ def _safe(adb, args):
         return ""
 
 
+def parse_uid_map(text):
+    """`pm list packages -U` -> {'u0a231': package}. uid 10231 == u0a231."""
+    out = {}
+    for m in re.finditer(r"package:(\S+)\s+uid:(\d+)", text or ""):
+        uid = int(m.group(2))
+        if uid >= 10000:
+            out[f"u0a{uid - 10000}"] = m.group(1)
+    return out
+
+
+def parse_power_use(text):
+    """'Estimated power use' section of `dumpsys batterystats --charged`
+    -> [(uid_str, mAh)] descending. Labels like 'Screen' are dropped."""
+    rows = []
+    for m in re.finditer(r"^\s+Uid (u0a\d+):\s+([\d.]+)", text or "", re.MULTILINE):
+        rows.append((m.group(1), float(m.group(2))))
+    return sorted(rows, key=lambda r: -r[1])
+
+
+def read_battery_report(adb, uid_map=None):
+    stats = _safe(adb, ["dumpsys", "batterystats", "--charged"])
+    if uid_map is None:
+        uid_map = parse_uid_map(_safe(adb, ["pm", "list", "packages", "-U", "-3"]))
+    top = [(uid_map.get(uid, uid), mah)
+           for uid, mah in parse_power_use(stats) if uid in uid_map][:5]
+    asoc = re.search(r"mSavedBatteryAsoc:\s*(\d+)", _safe(adb, ["dumpsys", "battery"]))
+    return {"top_drainers": top, "health_pct": int(asoc.group(1)) if asoc else None}
+
+
 def read_device_stats(adb):
     """Run the maintenance queries and return display-ready values."""
     total_ram, avail_ram = parse_meminfo(_safe(adb, ["cat", "/proc/meminfo"]))

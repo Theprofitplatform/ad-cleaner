@@ -1,4 +1,13 @@
+from pathlib import Path
+
+import device
 from device import GB, parse_battery, parse_df, parse_meminfo, read_device_stats
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fx(name):
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 def test_parse_meminfo():
@@ -54,3 +63,15 @@ def test_read_device_stats():
     assert s["storage_pct"] == 50
     assert s["battery_temp_c"] == 28.1
     assert s["battery_level"] == 77
+
+
+def test_parse_uid_map():
+    m = device.parse_uid_map(fx("packages_uids.txt"))
+    assert m == {"u0a231": "com.random.freegift", "u0a145": "com.whatsapp"}
+
+
+def test_parse_power_use_ranks_uids():
+    top = device.parse_power_use(fx("batterystats.txt"))
+    assert top[0] == ("u0a231", 145.0)
+    assert ("u0a145", 40.2) in top
+    assert device.parse_power_use("") == []

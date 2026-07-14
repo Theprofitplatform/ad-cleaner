@@ -1,0 +1,6 @@
+Estimated power use (mAh):
+    Capacity: 4000, Computed drain: 812, actual drain: 700-900
+    Uid u0a231: 145 ( cpu=90 wake=30 sensor=25 )
+    Uid u0a145: 40.2 ( cpu=40.2 )
+    Screen: 220
+    Uid 1000: 88.1 ( cpu=88.1 )

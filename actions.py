@@ -13,7 +13,7 @@ from adb import AdbError, data_dir
 from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
-UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications"}
+UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications", "debloat"}
 
 
 class ProtectedAppError(Exception):
@@ -84,6 +84,21 @@ def pause(adb, app, log):
     if ok:
         app.enabled = False
     log.append(adb.serial, app.package, "pause", "enabled", cmd, "ok" if ok else "failed")
+    return ok
+
+
+def debloat(adb, package, log):
+    """Disable a preinstalled junk package. Only exact members of the curated
+    bloat list may be touched -- the list is the safety authorization
+    (uninstalling the wrong OEM package can bootloop a phone; disabling can't).
+    """
+    from bloatware import BLOAT_SEED, _user_bloat
+    if package not in (BLOAT_SEED | _user_bloat()):
+        raise ProtectedAppError(f"{package} is not on the bloatware list")
+    cmd = ["pm", "disable-user", "--user", "0", package]
+    adb.shell_text(cmd)
+    ok = _is_disabled(adb, package)
+    log.append(adb.serial, package, "debloat", "enabled", cmd, "ok" if ok else "failed")
     return ok
 
 
@@ -384,6 +399,13 @@ def undo(adb, entry, log):
     """Reverse a logged action. Returns True on success."""
     action, pkg = entry["action"], entry["package"]
     if action == "pause":
+        cmd = ["pm", "enable", "--user", "0", pkg]
+        try:
+            adb.shell_text(cmd)
+        except AdbError:
+            cmd = ["pm", "enable", pkg]
+            adb.shell_text(cmd)
+    elif action == "debloat":
         cmd = ["pm", "enable", "--user", "0", pkg]
         try:
             adb.shell_text(cmd)

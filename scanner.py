@@ -8,7 +8,10 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from protected import is_protected, is_spoof
+from protected import (
+    extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
+    reset_blocklist,
+)
 
 # --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
 WEIGHTS = {
@@ -23,6 +26,7 @@ WEIGHTS = {
     "accessibility": 10,       # holds a BIND_ACCESSIBILITY_SERVICE grant (declared only)
     "sensitive_data": 10,      # can read SMS / call log / contacts
     "random_name": 10,         # package name has a random-looking segment
+    "nuisance": 30,            # junk cleaner/booster/optimizer or fake-app name
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
@@ -36,7 +40,9 @@ REASONS = {
     "accessibility": "Uses accessibility access",
     "sensitive_data": "Can read your texts, calls, or contacts",
     "random_name": "Has a random-looking package name",
+    "nuisance": "Looks like a junk cleaner/booster/optimizer app",
 }
+BLOCKED_REASON = "On the known-bad app blocklist"
 
 # Android role -> plain-English name (BUILD_PLAN risk mgmt). cmd role holders <role>.
 ROLES = {
@@ -211,9 +217,10 @@ def parse_enabled_accessibility(output):
 
 
 def parse_role_holders(output):
-    """`cmd role holders <role>` -> list of holder packages (one per line)."""
-    return [ln.strip() for ln in (output or "").splitlines()
-            if ln.strip() and "." in ln and " " not in ln.strip()]
+    """`cmd role get-role-holders <role>` -> list of holder packages.
+    AOSP prints multiple holders ';'-joined on one line, so split on that too."""
+    return [pkg for ln in (output or "").splitlines() if " " not in ln.strip()
+            for pkg in ln.strip().split(";") if pkg and "." in pkg]
 
 
 # --- Scoring ----------------------------------------------------------------
@@ -257,6 +264,7 @@ def score_app(app, now):
         "random_name": looks_random(app.package),
         "active_accessibility": app.active_accessibility,
         "role_hijack": bool(app.hijacked_roles),
+        "nuisance": looks_like_junk(app.package, app.label),
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
@@ -268,7 +276,11 @@ def score_app(app, now):
     if spoof:
         app.reasons.insert(0, SPOOF_REASON)
 
-    if spoof or app.score >= HIGH_THRESHOLD:
+    blocked = is_blocked(app.package)
+    if blocked:
+        app.reasons.insert(0, BLOCKED_REASON)
+
+    if spoof or blocked or app.score >= HIGH_THRESHOLD:
         app.risk = "HIGH"
     elif app.score >= MEDIUM_THRESHOLD:
         app.risk = "Medium"
@@ -286,9 +298,26 @@ def _safe(fn, default=""):
         return default
 
 
+def _load_user_blocklist():
+    """Rebuild the blocklist as seed + adcleaner_data/blocklist.txt (user-editable,
+    one id per line), so edits AND deletions take effect on the next scan.
+    Silent if the file is absent or unreadable -- the bundled seed still applies.
+    utf-8-sig: Windows editors (and PowerShell redirects) love BOMs.
+    """
+    from adb import data_dir  # local import: keep the parse/score core adb-free
+    reset_blocklist()
+    path = data_dir() / "blocklist.txt"
+    if path.exists():
+        try:
+            extend_blocklist(path.read_text(encoding="utf-8-sig").splitlines())
+        except (OSError, UnicodeDecodeError):
+            pass
+
+
 def build_inventory(adb, progress=None, now=None):
     """Scan the connected device and return scored Apps, highest risk first."""
     now = now or datetime.now()
+    _load_user_blocklist()
     installers = parse_third_party(_safe(lambda: adb.shell_text(
         ["pm", "list", "packages", "-3", "-i"])))
     disabled = parse_disabled(_safe(lambda: adb.shell_text(
@@ -307,7 +336,7 @@ def build_inventory(adb, progress=None, now=None):
     role_owner = {}  # package -> [role names it holds]
     for role, friendly in ROLES.items():
         for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
-                ["cmd", "role", "holders", role]))):
+                ["cmd", "role", "get-role-holders", role]))):
             role_owner.setdefault(pkg, []).append(friendly)
 
     apps = []
@@ -372,6 +401,25 @@ def demo():
                   first_install=datetime(2020, 1, 1))
     score_app(preload, now)
     assert preload.protected and preload.risk == "Low" and not preload.reasons
+
+    # Play-Store cleaner holding no dangerous perms -> nuisance signal -> Medium.
+    cleaner = App(package="com.phone.cleaner.shineapps", installer="com.android.vending",
+                  label="cleaner", first_install=datetime(2020, 1, 1))
+    score_app(cleaner, now)
+    assert cleaner.risk == "Medium", cleaner.score
+    assert REASONS["nuisance"] in cleaner.reasons
+
+    # Junk app wearing a system-style name -> NOT protected, flagged.
+    fake_sys = App(package="com.sec.reclean", installer="com.android.vending",
+                   first_install=datetime(2020, 1, 1))
+    score_app(fake_sys, now)
+    assert not fake_sys.protected and fake_sys.risk != "Low"
+
+    # Blocklisted id -> forced HIGH regardless of other signals.
+    blocked = App(package="com.cleanmaster.mguard", installer="com.android.vending",
+                  first_install=datetime(2020, 1, 1))
+    score_app(blocked, now)
+    assert blocked.risk == "HIGH" and BLOCKED_REASON in blocked.reasons
     print("scanner.py demo OK")
 
 

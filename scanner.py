@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from protected import (
     extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
+    reset_blocklist,
 )
 
 # --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
@@ -39,7 +40,7 @@ REASONS = {
     "accessibility": "Uses accessibility access",
     "sensitive_data": "Can read your texts, calls, or contacts",
     "random_name": "Has a random-looking package name",
-    "nuisance": "Looks like a junk cleaner/booster or a fake app",
+    "nuisance": "Looks like a junk cleaner/booster/optimizer app",
 }
 BLOCKED_REASON = "On the known-bad app blocklist"
 
@@ -216,9 +217,10 @@ def parse_enabled_accessibility(output):
 
 
 def parse_role_holders(output):
-    """`cmd role holders <role>` -> list of holder packages (one per line)."""
-    return [ln.strip() for ln in (output or "").splitlines()
-            if ln.strip() and "." in ln and " " not in ln.strip()]
+    """`cmd role get-role-holders <role>` -> list of holder packages.
+    AOSP prints multiple holders ';'-joined on one line, so split on that too."""
+    return [pkg for ln in (output or "").splitlines() if " " not in ln.strip()
+            for pkg in ln.strip().split(";") if pkg and "." in pkg]
 
 
 # --- Scoring ----------------------------------------------------------------
@@ -297,15 +299,18 @@ def _safe(fn, default=""):
 
 
 def _load_user_blocklist():
-    """Merge adcleaner_data/blocklist.txt (user-editable, one id per line) into
-    the blocklist. Silent if the file is absent -- the bundled seed still applies.
+    """Rebuild the blocklist as seed + adcleaner_data/blocklist.txt (user-editable,
+    one id per line), so edits AND deletions take effect on the next scan.
+    Silent if the file is absent or unreadable -- the bundled seed still applies.
+    utf-8-sig: Windows editors (and PowerShell redirects) love BOMs.
     """
     from adb import data_dir  # local import: keep the parse/score core adb-free
+    reset_blocklist()
     path = data_dir() / "blocklist.txt"
     if path.exists():
         try:
-            extend_blocklist(path.read_text(encoding="utf-8").splitlines())
-        except OSError:
+            extend_blocklist(path.read_text(encoding="utf-8-sig").splitlines())
+        except (OSError, UnicodeDecodeError):
             pass
 
 

@@ -15,6 +15,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 NOW = datetime(2024, 6, 1)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_blocklist(monkeypatch, tmp_path):
+    """build_inventory reads adcleaner_data/blocklist.txt via adb.data_dir; point
+    it at an empty tmp dir so tests never see the machine's real blocklist, and
+    restore the seed blocklist afterwards."""
+    import adb
+    monkeypatch.setattr(adb, "data_dir", lambda: tmp_path)
+    yield
+    scanner.reset_blocklist()
+
+
 def fx(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -127,6 +138,8 @@ def test_parse_enabled_accessibility():
 
 def test_parse_role_holders():
     assert parse_role_holders("com.foo.browser\n") == ["com.foo.browser"]
+    # AOSP joins multiple holders with ';' on one line.
+    assert parse_role_holders("com.foo.sms;com.bar.sms\n") == ["com.foo.sms", "com.bar.sms"]
     assert parse_role_holders("No holders.") == []
     assert parse_role_holders("") == []
 
@@ -249,6 +262,28 @@ def test_build_inventory_detects_role_hijack():
     # silently zeroed every UI-takeover detection (home/browser/sms/dialer).
     apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
     assert apps["com.random.freegift"].hijacked_roles == ["browser"]
+
+
+def test_user_blocklist_file_loaded_and_deletions_apply(tmp_path):
+    # utf-8-sig: a BOM'd file (typical of Windows editors) must not poison the
+    # first entry; an inline comment must be stripped.
+    (tmp_path / "blocklist.txt").write_text(
+        "com.random.freegift   # verified junk\n", encoding="utf-8-sig")
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert apps["com.random.freegift"].risk == "HIGH"
+    assert scanner.BLOCKED_REASON in apps["com.random.freegift"].reasons
+    # Deleting the line takes effect on the very next scan (no restart needed).
+    (tmp_path / "blocklist.txt").write_text("", encoding="utf-8")
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert scanner.BLOCKED_REASON not in apps["com.random.freegift"].reasons
+
+
+def test_unreadable_blocklist_file_does_not_kill_the_scan(tmp_path):
+    # A UTF-16 file (PowerShell's default '>>' encoding) must be skipped, not
+    # crash build_inventory with UnicodeDecodeError.
+    (tmp_path / "blocklist.txt").write_bytes("com.foo.bar\n".encode("utf-16"))
+    apps = build_inventory(FakeAdb(), now=NOW)
+    assert apps  # scan completed on the bundled seed alone
 
 
 def test_build_inventory_marks_overlay_from_appops():

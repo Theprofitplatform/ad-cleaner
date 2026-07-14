@@ -51,31 +51,31 @@ PROTECTED_EXACT = frozenset({
 
 
 # --- Junk / fake-app heuristics ---------------------------------------------
-# Consumer nuisanceware categories: cleaners, boosters, optimizers, and
-# repackaged fakes ("wrapper"). Substring match on the lowercased package/label.
+# Consumer nuisanceware categories: cleaners, boosters, optimizers. Substring
+# match on the lowercased package/label.
 # ponytail: heuristic knob, not a classifier -- a hit means "worth review", not
 # "malware". Tune the words; keep them specific enough to avoid legit apps
 # (e.g. "speed" is omitted so Ookla Speedtest isn't flagged).
 JUNK_WORDS = (
-    "cleaner", "clean", "booster", "boost", "optimizer", "optimize",
-    "speedup", "junk", "antivirus",
+    "clean", "boost", "optimize", "speedup", "junk", "antivirus",
 )
 
 # Known-bad package ids (exact match) -> forced HIGH. Seed of notorious
 # nuisanceware; extend per-device via adcleaner_data/blocklist.txt (loaded in
 # scanner.build_inventory -> extend_blocklist). ponytail: bundled seed + user
 # file is the whole "blocklist" feature; no online feed until one is asked for.
-_BLOCKLIST = {
+_SEED_BLOCKLIST = frozenset({
     "com.cleanmaster.mguard",           # Clean Master
     "com.cleanmaster.security",
     "com.dianxinos.optimizer.duplay",   # DU Speed Booster
     "com.qihoo.security",               # 360 Security
     "com.ijinshan.kbatterydoctor_en",   # Battery Doctor
-}
+})
+_BLOCKLIST = set(_SEED_BLOCKLIST)
 
 
 def looks_like_junk(package, label=None):
-    """True if the package/label reads as a junk cleaner/booster or repackaged fake."""
+    """True if the package/label reads as a junk cleaner/booster/optimizer."""
     hay = (package + " " + (label or "")).lower()
     return any(w in hay for w in JUNK_WORDS)
 
@@ -83,6 +83,14 @@ def looks_like_junk(package, label=None):
 def is_blocked(package):
     """True if the package is on the known-bad blocklist."""
     return package in _BLOCKLIST
+
+
+def reset_blocklist():
+    """Restore the blocklist to the bundled seed. Called before each re-merge of
+    the user file so deleting a line from blocklist.txt takes effect on the
+    next scan instead of after a process restart."""
+    _BLOCKLIST.clear()
+    _BLOCKLIST.update(_SEED_BLOCKLIST)
 
 
 def extend_blocklist(ids):
@@ -141,11 +149,14 @@ def is_protected(package, installer=None, is_system=False):
     A real system-partition app (is_system) is always protected. A third-party
     app that only *looks* system by name (e.g. 'com.sec.reclean') but is a known
     junk id or has a junk/fake name is NOT protected -- otherwise the prefix rule
-    would whitelist nuisanceware wearing a system-style name.
+    would whitelist nuisanceware wearing a system-style name. The junk/blocklist
+    override is fenced to the PREFIX rule only: named essentials
+    (PROTECTED_EXACT -- Play Store, SystemUI, ...) can never be unprotected by a
+    heuristic word hit or a stray blocklist.txt line.
     """
     if is_system:
         return True
-    if is_blocked(package) or looks_like_junk(package):
+    if package not in PROTECTED_EXACT and (is_blocked(package) or looks_like_junk(package)):
         return False
     return is_genuine_system(package, installer, is_system)
 

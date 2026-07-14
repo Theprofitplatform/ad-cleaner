@@ -39,6 +39,8 @@ def render_receipt_html(receipt):
     if pkgs:
         items = "".join(f"<li>{html.escape(p)}</li>" for p in pkgs)
         pkg_block = f"<h2>{verb} apps</h2><ul>{items}</ul>"
+    battery_line = (f"<p><b>Battery health:</b> {html.escape(str(r['battery_health']))}</p>"
+                     if r.get("battery_health") else "")
     body = (
         "<h1>Ad Cleaner — clean receipt</h1>"
         f"<p class='muted'>{html.escape(r.get('when', ''))} &middot; "
@@ -48,7 +50,7 @@ def render_receipt_html(receipt):
         f"<p><b>Pop-up permissions blocked:</b> {r.get('popups_blocked', 0)}</p>"
         f"<p><b>{verb}:</b> {r.get('acted', 0)} risky app(s)</p>"
         f"<p><b>Ad blocking (Private DNS):</b> {html.escape(str(r.get('dns', 'Off')))}</p>"
-        f"{freed_line}{pkg_block}"
+        f"{freed_line}{battery_line}{pkg_block}"
     )
     return _html_page("Ad Cleaner receipt", body)
 
@@ -77,6 +79,9 @@ def demo():
     assert "no space freed" in render_receipt_html({**r, "removed": False, "freed_gb": 0}).lower()
     removed0 = render_receipt_html({**r, "removed": True, "freed_gb": 0})
     assert "still installed" not in removed0 and "No measurable change" in removed0
+    with_health = render_receipt_html({**r, "battery_health": "82% of original capacity"})
+    assert "Battery health" in with_health and "82% of original capacity" in with_health
+    assert "Battery health" not in out
     hist = render_history_html([{"time": "t", "package": "<b>x", "action": "pause", "result": "ok"}])
     assert "<b>x" not in hist and "&lt;b&gt;x" in hist
     print("report.py demo OK")

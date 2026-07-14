@@ -22,7 +22,7 @@ from actions import (
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
-from device import read_device_stats
+from device import read_battery_report, read_device_stats
 from report import render_history_html, render_receipt_html
 from scanner import ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
@@ -186,6 +186,7 @@ class AdCleanerApp:
         self.alive = True
         self.busy = False
         self._pending_clean = False
+        self.battery_report = None
         self._settings = self._load_settings()
         self.shop_mode = tk.BooleanVar(value=self._settings.get("shop_mode", False))
         self.uninstall_mode = tk.BooleanVar(
@@ -505,12 +506,15 @@ class AdCleanerApp:
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 14))
 
         self.dev_vars = {k: tk.StringVar(value="—")
-                         for k in ("storage", "ram", "temp", "battery")}
+                         for k in ("storage", "ram", "temp", "battery",
+                                   "battery_health", "top_drainer")}
         self.dev_labels = {}
         grid = ttk.Frame(tab)
         grid.pack(anchor="w")
         rows = [("💾  Storage", "storage"), ("🧠  Memory (RAM)", "ram"),
-                ("🌡️  Battery temperature", "temp"), ("🔋  Battery level", "battery")]
+                ("🌡️  Battery temperature", "temp"), ("🔋  Battery level", "battery"),
+                ("🔋  Battery health", "battery_health"),
+                ("⚡  Top battery user", "top_drainer")]
         for i, (label, key) in enumerate(rows):
             ttk.Label(grid, text=label, font=(FONT, 11, "bold")).grid(
                 row=i, column=0, sticky="w", padx=(0, 24), pady=6)
@@ -1526,6 +1530,9 @@ class AdCleanerApp:
                 "packages": res.get("packages", []), "dns": res.get("dns", "Off"),
                 "freed_gb": res.get("freed_gb", 0),
             }
+            if self.battery_report and self.battery_report["health_pct"]:
+                receipt["battery_health"] = (
+                    f"{self.battery_report['health_pct']}% of original capacity")
             folder = data_dir() / "reports"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"receipt_{datetime.now():%Y%m%d_%H%M%S}.html"
@@ -1637,6 +1644,11 @@ class AdCleanerApp:
                 self._post(self._show_device, stats)
             except Exception:
                 pass
+            try:
+                report = read_battery_report(self.adb)
+                self._post(self._show_battery_report, report)
+            except Exception:
+                pass
 
         self._run_bg(work)
 
@@ -1674,6 +1686,15 @@ class AdCleanerApp:
 
         self.dev_vars["battery"].set(
             f"{s['battery_level']}%" if s["battery_level"] is not None else "— couldn't read")
+
+    def _show_battery_report(self, report):
+        self.battery_report = report
+        health = report["health_pct"]
+        self.dev_vars["battery_health"].set(
+            f"{health}% of original capacity" if health else "—")
+        top = report["top_drainers"]
+        self.dev_vars["top_drainer"].set(
+            f"{top[0][0]} ({top[0][1]:g} mAh since last charge)" if top else "—")
 
     def on_clear_caches(self):
         if self.busy or not self.serial:

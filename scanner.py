@@ -27,6 +27,7 @@ WEIGHTS = {
     "sensitive_data": 10,      # can read SMS / call log / contacts
     "random_name": 10,         # package name has a random-looking segment
     "nuisance": 30,            # junk cleaner/booster/optimizer or fake-app name
+    "notif_spam": 10,          # floods the notification shade
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
@@ -41,6 +42,7 @@ REASONS = {
     "sensitive_data": "Can read your texts, calls, or contacts",
     "random_name": "Has a random-looking package name",
     "nuisance": "Looks like a junk cleaner/booster/optimizer app",
+    "notif_spam": "Floods the phone with notifications",
 }
 BLOCKED_REASON = "On the known-bad app blocklist"
 
@@ -89,6 +91,7 @@ SPOOF_REASON = "Pretends to be a system app"
 HIGH_THRESHOLD = 55
 MEDIUM_THRESHOLD = 30
 RECENT_DAYS = 30
+NOISY_THRESHOLD = 5        # active notifications at scan time -> "notif_spam" signal
 # ---------------------------------------------------------------------------
 
 
@@ -111,6 +114,7 @@ class App:
     active_accessibility: bool = False   # accessibility service is enabled (not just declared)
     hijacked_roles: list = field(default_factory=list)   # role names it holds (home/browser/…)
     stopped: bool = False             # transient: force-stopped this session
+    notif_count: int = 0              # active notifications at scan time
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
@@ -240,6 +244,20 @@ def parse_role_holders(output):
             for pkg in ln.strip().split(";") if pkg and "." in pkg]
 
 
+def parse_notification_counts(output):
+    """`dumpsys notification --noredact` -> {package: active notification count}.
+
+    ponytail: [^)\n]* not [^)]* -- pkg= is always on the NotificationRecord( line,
+    and real dumps don't reliably close the paren on that same line, so an
+    unbounded [^)]* backtracks across the whole remaining dump on the first
+    record and only captures the last pkg= in the file.
+    """
+    counts = {}
+    for m in re.finditer(r"NotificationRecord\([^)\n]*\bpkg=([\w.]+)", output or ""):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return counts
+
+
 # --- Scoring ----------------------------------------------------------------
 
 def looks_random(package):
@@ -282,6 +300,7 @@ def score_app(app, now):
         "active_accessibility": app.active_accessibility,
         "role_hijack": bool(app.hijacked_roles),
         "nuisance": looks_like_junk(app.package, app.label),
+        "notif_spam": app.notif_count >= NOISY_THRESHOLD,
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
@@ -355,6 +374,8 @@ def build_inventory(adb, progress=None, now=None):
         for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
                 ["cmd", "role", "get-role-holders", role]))):
             role_owner.setdefault(pkg, []).append(friendly)
+    notif = parse_notification_counts(_safe(lambda: adb.shell_text(
+        ["dumpsys", "notification", "--noredact"])))
 
     apps = []
     packages = sorted(installers)
@@ -381,6 +402,7 @@ def build_inventory(adb, progress=None, now=None):
             sensitive_perms=perms["sensitive_perms"],
             active_accessibility=pkg in a11y_on,
             hijacked_roles=role_owner.get(pkg, []),
+            notif_count=notif.get(pkg, 0),
         )
         score_app(app, now)
         apps.append(app)

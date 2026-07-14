@@ -16,9 +16,9 @@ from tkinter import filedialog, messagebox, ttk
 
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
-    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky,
-    clear_caches, clear_private_dns, fix_role, pause, read_private_dns, reboot, reset_app_data,
-    resume, set_private_dns, stop_all, undo, uninstall, will_clean,
+    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
+    clean_risky, clear_caches, clear_private_dns, fix_role, pause, read_private_dns, reboot,
+    reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
 from crashes import read_crash_report, summarize
 from device import read_device_stats
@@ -457,8 +457,10 @@ class AdCleanerApp:
                                             SLATE, SLATE_HOT)
         self.fixrole_btn = self._flat_button(btns, "🛠  Restore default apps", self.on_fix_roles,
                                              GREEN, GREEN_HOT)
+        self.notif_btn = self._flat_button(btns, "🔕  Stop its notifications",
+                                           self.on_block_notifs, AMBER, AMBER_HOT)
         self.detail_btns = (self.pause_btn, self.resume_btn, self.uninstall_btn,
-                            self.reset_btn, self.backup_btn, self.fixrole_btn)
+                            self.reset_btn, self.backup_btn, self.fixrole_btn, self.notif_btn)
         for b in self.detail_btns:
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
@@ -529,8 +531,11 @@ class AdCleanerApp:
         self.reboot_btn = self._flat_button(btns, "🔌  Reboot phone",
                                             self.on_reboot, SLATE, SLATE_HOT)
         self.reboot_btn.pack(side="left")
+        self.popups_btn = self._flat_button(btns, "🚫  Stop fake virus pop-ups (Chrome)",
+                                            self.on_chrome_popups, AMBER, AMBER_HOT)
+        self.popups_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
-                         self.reboot_btn)
+                         self.reboot_btn, self.popups_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1237,6 +1242,7 @@ class AdCleanerApp:
         self._enable_btn(self.reset_btn, True)
         self._enable_btn(self.backup_btn, True)
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
+        self._enable_btn(self.notif_btn, a.notif_count > 0)
 
     # --- actions ------------------------------------------------------------
 
@@ -1343,6 +1349,29 @@ class AdCleanerApp:
             self._update_detail()
         else:
             self.status_line("Couldn't restore the defaults on this phone.", "error")
+
+    def on_block_notifs(self):
+        a = self.selected
+        if not a or self.busy or not self.serial:
+            return
+        label = a.label.split(" (")[0]
+
+        def work():
+            try:
+                block_notifications(self.adb, a.package, self.log)
+                self._post(self._block_notifs_done, label, None)
+            except AdbError as e:
+                self._post(self._block_notifs_done, label, str(e))
+
+        self.busy = True
+        self._run_bg(work)
+
+    def _block_notifs_done(self, label, err):
+        self.busy = False
+        if err:
+            self.status_line("Couldn't stop notifications. " + self._friendly(err), "error")
+        else:
+            self.status_line(f"✅ Notifications stopped for {label}", "good")
 
     def on_backup_apk(self):
         a = self.selected
@@ -1733,6 +1762,36 @@ class AdCleanerApp:
             self.status_line("Rebooting the phone…", "good")
         except Exception as e:
             self.status_line("Couldn't reboot. " + self._friendly(str(e)), "error")
+
+    def on_chrome_popups(self):
+        """One-click fix for fake-virus site-notification spam: Chrome is the only
+        no-root path for these, so this silences ALL its notifications at once."""
+        if self.busy or not self.serial:
+            return
+        if not messagebox.askyesno(
+                "Stop fake virus pop-ups",
+                "This silences ALL Chrome notifications (including sites the customer "
+                "wants). They can re-enable in Android Settings. Continue?", default="no"):
+            return
+        self.busy = True
+        self.status_line("Stopping Chrome notifications…")
+
+        def work():
+            try:
+                block_notifications(self.adb, "com.android.chrome", self.log)
+                self._post(self._chrome_popups_done, None)
+            except AdbError as e:
+                self._post(self._chrome_popups_done, str(e))
+
+        self._run_bg(work)
+
+    def _chrome_popups_done(self, err):
+        self.busy = False
+        if err:
+            self.status_line("Couldn't stop Chrome notifications. " + self._friendly(err),
+                             "error")
+        else:
+            self.status_line("✅ Chrome notifications stopped.", "good")
 
     # --- Private DNS (system-wide ad blocking) -------------------------------
 

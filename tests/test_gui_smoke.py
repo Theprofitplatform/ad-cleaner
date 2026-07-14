@@ -17,6 +17,7 @@ TINY_PNG = base64.b64decode(
 tkinter = pytest.importorskip("tkinter")
 import gui
 from actions import ActionLog
+from adb import AdbError
 from scanner import App, score_app
 
 NOW = datetime(2024, 6, 1)
@@ -63,7 +64,11 @@ class FakeAdb:
         if args[:3] == ["pm", "clear", "--user"]:
             return "Success"
         if args[:2] == ["pm", "path"]:
-            return "package:/data/app/x/base.apk\n"
+            return f"package:/data/app/{args[-1]}/base.apk" if args[-1] in self.installed else ""
+        if args[:3] == ["cmd", "role", "add-role-holder"]:
+            self.role_holder = args[-1]; return ""
+        if args[:3] == ["cmd", "role", "get-role-holders"]:
+            return getattr(self, "role_holder", "")
         if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
             return ""
         if args[:3] == ["settings", "get", "global"]:
@@ -328,3 +333,35 @@ def test_dns_toggle_sets_and_clears(root, monkeypatch, tmp_path):
     app.on_dns_off()
     pump(root, 0.6)
     assert app.adb.globals.get("private_dns_mode") == "off"
+
+
+def test_fix_roles_button_restores_and_updates_detail(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.adb.installed |= {"com.android.chrome"}
+    a = App(package="com.random.freegift", installer=None, risk="HIGH",
+            hijacked_roles=["browser"])
+    app.apps = [a]; app._render_table()
+    app.tree.selection_set("com.random.freegift"); app._on_select()
+    app.on_fix_roles()
+    pump(root, 1.0)
+    assert a.hijacked_roles == []
+
+
+def test_fix_roles_button_clears_busy_on_adb_error(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+
+    def raise_adb_error(*a, **k):
+        raise AdbError("boom")
+
+    monkeypatch.setattr(gui, "fix_role", raise_adb_error)
+    a = App(package="com.random.freegift", installer=None, risk="HIGH",
+            hijacked_roles=["browser"])
+    app.apps = [a]; app._render_table()
+    app.tree.selection_set("com.random.freegift"); app._on_select()
+    app.on_fix_roles()
+    pump(root, 1.0)
+    assert app.busy is False

@@ -5,8 +5,8 @@ import pytest
 import actions
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
-    clear_private_dns, disable_accessibility, pause, read_private_dns, reboot, reset_app_data,
-    resume, set_private_dns, stop_all, undo, uninstall, will_clean,
+    clear_private_dns, disable_accessibility, fix_role, pause, read_private_dns, reboot,
+    reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
 from scanner import App, REASONS
 
@@ -22,6 +22,7 @@ class FakeAdb:
         self.pulled = []
         self.rebooted = False
         self.calls = []
+        self.commands = []
         self.globals = {}
 
     def pull(self, remote, local, timeout=120):
@@ -35,6 +36,7 @@ class FakeAdb:
 
     def shell_text(self, args, timeout=10):
         self.calls.append(args)
+        self.commands.append(" ".join(args))
         if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
             return self.a11y
         if args[:4] == ["settings", "put", "secure", "enabled_accessibility_services"]:
@@ -44,7 +46,11 @@ class FakeAdb:
         if args[:3] == ["pm", "clear", "--user"]:
             return "Success"
         if args[:2] == ["pm", "path"]:
-            return "package:/data/app/~~x/base.apk\n"
+            return f"package:/data/app/{args[-1]}/base.apk" if args[-1] in self.installed else ""
+        if args[:3] == ["cmd", "role", "add-role-holder"]:
+            self.role_holder = args[-1]; return ""
+        if args[:3] == ["cmd", "role", "get-role-holders"]:
+            return getattr(self, "role_holder", "")
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return "disabled"
         if args[:2] == ["pm", "enable"]:
@@ -313,3 +319,29 @@ def test_clean_risky_reports_popups_blocked(log):
                 overlay=False, risk="Medium")
     res = clean_risky(adb, [adware, quiet], log)
     assert res["popups_blocked"] == 1     # only the overlay app is denied
+
+
+def test_fix_role_hands_role_to_first_installed_stock_app(log):
+    adb = FakeAdb()
+    adb.installed |= {"com.android.chrome"}
+    restored = fix_role(adb, "android.app.role.BROWSER", "com.random.freegift", log)
+    assert restored == "com.android.chrome"
+    assert ("cmd role add-role-holder --user 0 android.app.role.BROWSER "
+            "com.android.chrome") in adb.commands
+    entry = log.recent()[0]
+    assert entry["action"] == "fix-role" and entry["previous"] == "com.random.freegift"
+    assert can_undo(entry)
+
+
+def test_fix_role_returns_none_when_no_stock_candidate(log):
+    adb = FakeAdb()   # no browser installed
+    assert fix_role(adb, "android.app.role.BROWSER", "com.random.freegift", log) is None
+
+
+def test_undo_fix_role_reinstates_previous_holder(log):
+    adb = FakeAdb()
+    adb.installed |= {"com.android.chrome"}
+    fix_role(adb, "android.app.role.BROWSER", "com.random.freegift", log)
+    undo(adb, log.recent()[0], log)
+    assert ("cmd role add-role-holder --user 0 android.app.role.BROWSER "
+            "com.random.freegift") in adb.commands

@@ -17,13 +17,13 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky,
-    clear_caches, clear_private_dns, pause, read_private_dns, reboot, reset_app_data,
+    clear_caches, clear_private_dns, fix_role, pause, read_private_dns, reboot, reset_app_data,
     resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
 from crashes import read_crash_report, summarize
 from device import read_device_stats
 from report import render_history_html, render_receipt_html
-from scanner import build_inventory
+from scanner import ROLE_IDS, build_inventory
 from setup_helper import download_platform_tools
 
 # --- palette ---------------------------------------------------------------
@@ -455,8 +455,10 @@ class AdCleanerApp:
                                            SLATE, SLATE_HOT)
         self.backup_btn = self._flat_button(btns, "💾  Backup APK", self.on_backup_apk,
                                             SLATE, SLATE_HOT)
+        self.fixrole_btn = self._flat_button(btns, "🛠  Restore default apps", self.on_fix_roles,
+                                             GREEN, GREEN_HOT)
         self.detail_btns = (self.pause_btn, self.resume_btn, self.uninstall_btn,
-                            self.reset_btn, self.backup_btn)
+                            self.reset_btn, self.backup_btn, self.fixrole_btn)
         for b in self.detail_btns:
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
@@ -1234,6 +1236,7 @@ class AdCleanerApp:
         self._enable_btn(self.uninstall_btn, True)
         self._enable_btn(self.reset_btn, True)
         self._enable_btn(self.backup_btn, True)
+        self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
 
     # --- actions ------------------------------------------------------------
 
@@ -1310,6 +1313,36 @@ class AdCleanerApp:
                 "stays installed but is reset to fresh.", default="no"):
             return
         self._do_action(lambda: reset_app_data(self.adb, a, self.log), a, "Reset")
+
+    def on_fix_roles(self):
+        a = self.selected
+        if not a or self.busy or not self.serial:
+            return
+
+        def work():
+            restored = []
+            try:
+                for friendly in list(a.hijacked_roles):
+                    role_id = ROLE_IDS.get(friendly)
+                    if role_id:
+                        pkg = fix_role(self.adb, role_id, a.package, self.log)
+                        if pkg:
+                            restored.append(friendly)
+            except AdbError:
+                pass
+            self._post(self._fix_roles_done, a, restored)
+
+        self.busy = True
+        self._run_bg(work)
+
+    def _fix_roles_done(self, app, restored):
+        self.busy = False
+        if restored:
+            app.hijacked_roles = [r for r in app.hijacked_roles if r not in restored]
+            self.status_line("✅ Restored: " + ", ".join(restored), "good")
+            self._update_detail()
+        else:
+            self.status_line("Couldn't restore the defaults on this phone.", "error")
 
     def on_backup_apk(self):
         a = self.selected

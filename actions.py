@@ -11,9 +11,9 @@ from pathlib import Path
 
 from adb import AdbError, data_dir
 from protected import is_protected
-from scanner import REASONS, parse_disabled
+from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
-UNDOABLE = {"pause", "uninstall", "block-popup"}
+UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role"}
 
 
 class ProtectedAppError(Exception):
@@ -236,6 +236,34 @@ def reset_app_data(adb, app, log):
     return True
 
 
+def _installed(adb, package):
+    """True if the package is present for user 0 (pm path prints its APK)."""
+    try:
+        return bool(adb.shell_text(["pm", "path", package]).strip())
+    except AdbError:
+        return False
+
+
+def fix_role(adb, role_id, hijacker_pkg, log):
+    """Hand a hijacked default (browser/SMS/dialer/home) back to a stock app.
+
+    Works no-root on Android 10+ (shell holds MANAGE_ROLE_HOLDERS). The target
+    must qualify for the role or Android silently ignores the command, so the
+    result is verified by re-reading the holder. Undo re-crowns the hijacker.
+    """
+    for candidate in STOCK_ROLE_HOLDERS.get(role_id, ()):
+        if not _installed(adb, candidate):
+            continue
+        cmd = ["cmd", "role", "add-role-holder", "--user", "0", role_id, candidate]
+        adb.shell_text(cmd)
+        holders = adb.shell_text(["cmd", "role", "get-role-holders", role_id])
+        ok = candidate in holders
+        log.append(adb.serial, candidate, "fix-role", hijacker_pkg, cmd,
+                   "ok" if ok else "failed")
+        return candidate if ok else None
+    return None
+
+
 def backup_apk(adb, app, dest_dir):
     """Pull the app's APK(s) to dest_dir before removal. Returns saved file paths."""
     out = adb.shell_text(["pm", "path", app.package])
@@ -345,6 +373,10 @@ def undo(adb, entry, log):
         adb.shell_text(cmd)
     elif action == "block-popup":
         cmd = ["appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"]
+        adb.shell_text(cmd)
+    elif action == "fix-role":
+        role_id = entry["command"].split()[5]
+        cmd = ["cmd", "role", "add-role-holder", "--user", "0", role_id, entry["previous"]]
         adb.shell_text(cmd)
     else:
         raise AdbError("This action can't be undone.")

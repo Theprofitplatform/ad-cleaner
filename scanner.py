@@ -51,6 +51,23 @@ ROLES = {
     "android.app.role.SMS": "text messages",
     "android.app.role.DIALER": "phone dialer",
 }
+ROLE_IDS = {v: k for k, v in ROLES.items()}   # friendly name -> role id
+
+# Stock apps to hand a hijacked role back to, best candidate first.
+# ponytail: static candidate list, not device introspection -- extend as
+# OEMs surface. fix_role picks the first one actually installed.
+STOCK_ROLE_HOLDERS = {
+    "android.app.role.HOME": ("com.sec.android.app.launcher",
+                              "com.google.android.apps.nexuslauncher",
+                              "com.miui.home", "com.android.launcher3"),
+    "android.app.role.BROWSER": ("com.android.chrome",
+                                 "com.sec.android.app.sbrowser",
+                                 "com.mi.globalbrowser", "com.android.browser"),
+    "android.app.role.SMS": ("com.google.android.apps.messaging",
+                             "com.samsung.android.messaging"),
+    "android.app.role.DIALER": ("com.google.android.dialer",
+                                "com.samsung.android.dialer"),
+}
 
 # Sensitive permissions shown in the detail pane (BUILD_PLAN 4.2 / risk mgmt).
 SENSITIVE_PERMS = [

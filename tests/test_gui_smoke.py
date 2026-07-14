@@ -142,6 +142,10 @@ def _wire(gui_mod, monkeypatch, tmp_path, adb_cls=FakeAdb):
     monkeypatch.setattr(gui_mod.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(gui_mod.messagebox, "showinfo", lambda *a, **k: None)
     monkeypatch.setattr(gui_mod.webbrowser, "open", lambda *a, **k: None)
+    # keep tests hermetic: no Google Play lookups, no APK pulls for icons
+    monkeypatch.setattr(gui_mod.playstore, "lookup", lambda pkg, **k: None)
+    monkeypatch.setattr(gui_mod.playstore, "fetch_icon", lambda url, **k: None)
+    monkeypatch.setattr(gui_mod.appicon, "device_icon", lambda adb, pkg: None)
 
 
 def test_opens_and_shows_wizard_without_phone(root, monkeypatch, tmp_path):
@@ -405,3 +409,40 @@ def test_chrome_popup_quickfix_blocks_notifications(root, monkeypatch, tmp_path)
     assert any("com.android.chrome" in c and
                ("revoke" in c or "POST_NOTIFICATION" in c)
                for c in app.adb.commands)
+
+
+def test_play_check_updates_table_and_detail(root, monkeypatch, tmp_path):
+    """Play results trickle in post-scan: unlisted apps get flagged (once),
+    listed ones show Google's official name in the detail pane."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+
+    adware = next(a for a in app.apps if a.package == "com.random.adware")
+    app._apply_play(adware, {"listed": False, "name": None, "icon": None})
+    app._apply_play(adware, {"listed": False, "name": None, "icon": None})
+    assert adware.reasons.count(gui.playstore.NOT_LISTED_REASON) == 1
+    app.tree.selection_set("com.random.adware"); app._on_select()
+    pump(root, 0.2)
+    assert gui.playstore.NOT_LISTED_REASON in app.detail_reasons["text"]
+
+    fake = App(package="com.fake.chrome", installer=None, first_install=NOW)
+    score_app(fake, NOW)
+    app.apps.append(fake)
+    app.suspicious_var.set(False); app._render_table()
+    app._apply_play(fake, {"listed": True, "name": "Google Chrome", "icon": None})
+    app.tree.selection_set("com.fake.chrome"); app._on_select()
+    pump(root, 0.2)
+    assert "Google Chrome" in app.detail_reasons["text"]
+
+    # icon plumbing: a valid PNG lands in (and clears from) the detail pane
+    p = tmp_path / "icon.png"
+    img = tkinter.PhotoImage(master=root, width=4, height=4)
+    img.put("#ff0000", to=(0, 0, 4, 4))
+    img.write(str(p), format="png")
+    app._set_detail_icon(p)
+    assert str(app.detail_icon["image"])
+    app._clear_detail()
+    assert not str(app.detail_icon["image"])
+    app._set_detail_icon(tmp_path / "corrupt.png")   # missing/bad file -> no crash
+    assert not str(app.detail_icon["image"])

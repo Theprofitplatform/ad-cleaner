@@ -96,6 +96,25 @@ same file works for any Android phone: Samsung, Google, Xiaomi, Motorola, etc.
 
 ---
 
+## Moving to a new phone
+
+The **Move to new phone** tab copies your **photos, videos, music, Downloads and
+documents** from an old Android to a new one, using this PC in between. Nothing
+is deleted from either phone.
+
+1. Plug in the **old** phone → **⬇ Save photos & files to this PC**.
+2. Unplug it, plug in the **new** phone → **⬆ Copy onto the new phone**.
+
+**Contacts, texts and apps don't travel over the cable** — Android blocks that on
+purpose. The easy built-in ways:
+- **Contacts & calendar** already ride on your Google account — just sign into
+  the same account on the new phone.
+- **Apps, texts and the rest** → use the new phone's own **"Copy apps & data"**
+  wizard during setup (on Samsung it's **Smart Switch**). It moves everything,
+  cable-to-cable, no PC needed. The tab has a link with step-by-step help.
+
+---
+
 ## Troubleshooting
 
 - **"Windows protected your PC"** → Click **More info → Run anyway**.

@@ -302,6 +302,21 @@ def test_reset_data_from_detail(root, monkeypatch, tmp_path):
     assert ["pm", "clear", "--user", "0", "com.random.adware"] in app.adb.calls
 
 
+def test_restrict_data_from_detail(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    a = App(package="com.random.freegift", installer=None, risk="HIGH",
+            uid=10231, data_mb=81)
+    app.apps = [a]; app._render_table()
+    app.tree.selection_set("com.random.freegift"); app._on_select()
+    pump(root, 0.1)
+    assert "Data used: 81 MB" in app.detail_reasons["text"]
+    app.on_restrict_data()
+    pump(root, 0.6)
+    assert "cmd netpolicy add restrict-background-blacklist 10231" in app.adb.commands
+
+
 def test_screenshot_and_reboot(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

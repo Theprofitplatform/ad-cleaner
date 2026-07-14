@@ -1657,7 +1657,7 @@ class AdCleanerApp:
                                key=lambda a: -a.used_min)[:3]
             if top_used:
                 receipt["most_used"] = ", ".join(
-                    f"{a.label or a.package} ({a.used_min} min)" for a in top_used)
+                    f"{a.label.split(' (')[0] or a.package} ({a.used_min} min)" for a in top_used)
             folder = data_dir() / "reports"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"receipt_{datetime.now():%Y%m%d_%H%M%S}.html"

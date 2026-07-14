@@ -1,0 +1,2 @@
+    package=com.random.freegift totalTimeUsed="04:20" lastTimeUsed="2024-06-01 09:00:00" totalTimeVisible="04:20"
+    package=com.whatsapp totalTimeUsed="1:02:11" lastTimeUsed="2024-06-01 10:00:00" totalTimeVisible="1:02:11"

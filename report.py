@@ -41,6 +41,8 @@ def render_receipt_html(receipt):
         pkg_block = f"<h2>{verb} apps</h2><ul>{items}</ul>"
     battery_line = (f"<p><b>Battery health:</b> {html.escape(str(r['battery_health']))}</p>"
                      if r.get("battery_health") else "")
+    most_used_line = (f"<p><b>Most-used apps:</b> {html.escape(str(r['most_used']))}</p>"
+                       if r.get("most_used") else "")
     body = (
         "<h1>Ad Cleaner — clean receipt</h1>"
         f"<p class='muted'>{html.escape(r.get('when', ''))} &middot; "
@@ -50,7 +52,7 @@ def render_receipt_html(receipt):
         f"<p><b>Pop-up permissions blocked:</b> {r.get('popups_blocked', 0)}</p>"
         f"<p><b>{verb}:</b> {r.get('acted', 0)} risky app(s)</p>"
         f"<p><b>Ad blocking (Private DNS):</b> {html.escape(str(r.get('dns', 'Off')))}</p>"
-        f"{freed_line}{battery_line}{pkg_block}"
+        f"{freed_line}{battery_line}{most_used_line}{pkg_block}"
     )
     return _html_page("Ad Cleaner receipt", body)
 
@@ -82,6 +84,9 @@ def demo():
     with_health = render_receipt_html({**r, "battery_health": "82% of original capacity"})
     assert "Battery health" in with_health and "82% of original capacity" in with_health
     assert "Battery health" not in out
+    with_used = render_receipt_html({**r, "most_used": "WhatsApp (62 min), Chrome (30 min)"})
+    assert "Most-used apps" in with_used and "WhatsApp (62 min)" in with_used
+    assert "Most-used apps" not in out
     hist = render_history_html([{"time": "t", "package": "<b>x", "action": "pause", "result": "ok"}])
     assert "<b>x" not in hist and "&lt;b&gt;x" in hist
     print("report.py demo OK")

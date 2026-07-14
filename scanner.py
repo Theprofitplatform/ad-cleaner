@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from device import parse_data_use
+from device import parse_data_use, parse_usage_minutes
 from protected import (
     extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
     reset_blocklist,
@@ -120,6 +120,7 @@ class App:
     notif_count: int = 0              # active notifications at scan time
     data_mb: int = 0                  # background+foreground data used, MB (dumpsys netstats)
     uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
+    used_min: int = 0                 # foreground usage minutes (dumpsys usagestats)
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
@@ -396,6 +397,8 @@ def build_inventory(adb, progress=None, now=None):
         ["pm", "list", "packages", "-3", "-U"])))
     data_use = parse_data_use(_safe(lambda: adb.shell_text(
         ["dumpsys", "netstats"])))
+    usage = parse_usage_minutes(_safe(lambda: adb.shell_text(
+        ["dumpsys", "usagestats"])))
 
     apps = []
     packages = sorted(installers)
@@ -426,6 +429,7 @@ def build_inventory(adb, progress=None, now=None):
             notif_count=notif.get(pkg, 0),
             uid=uid,
             data_mb=data_use.get(uid, 0) // (1024 * 1024),
+            used_min=usage.get(pkg, 0),
         )
         score_app(app, now)
         apps.append(app)

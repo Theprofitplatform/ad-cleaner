@@ -8,6 +8,7 @@ Skipped where Tk can't open a display.
 import base64
 import time
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,11 @@ from adb import AdbError
 from scanner import App, score_app
 
 NOW = datetime(2024, 6, 1)
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fx(name):
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 class FakeAdb:
@@ -89,6 +95,10 @@ class FakeAdb:
             return "package:com.facebook.appmanager\n"
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
+        if args == ["dumpsys", "batterystats", "--charged"]:
+            return fx("batterystats.txt")
+        if args == ["pm", "list", "packages", "-U", "-3"]:
+            return fx("packages_uids.txt")
         return ""
 
 
@@ -446,3 +456,19 @@ def test_play_check_updates_table_and_detail(root, monkeypatch, tmp_path):
     assert not str(app.detail_icon["image"])
     app._set_detail_icon(tmp_path / "corrupt.png")   # missing/bad file -> no crash
     assert not str(app.detail_icon["image"])
+
+
+def test_device_tab_shows_top_battery_drainer(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    assert "mAh" in app.dev_vars["top_drainer"].get()
+
+
+def test_battery_health_zero_shows_no_data(root, monkeypatch, tmp_path):
+    """When battery health is 0 (uncalibrated), show no-data indicator, not '0%'."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app._show_battery_report({"top_drainers": [], "health_pct": 0})
+    assert app.dev_vars["battery_health"].get() == "—"

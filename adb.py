@@ -121,6 +121,9 @@ class Adb:
     def pull(self, remote, local, timeout=120):
         return self.run(["pull", remote, local], timeout=timeout)
 
+    def push(self, local, remote, timeout=120):
+        return self.run(["push", local, remote], timeout=timeout)
+
     def reboot(self, timeout=DEFAULT_TIMEOUT):
         return self.run(["reboot"], timeout=timeout)
 

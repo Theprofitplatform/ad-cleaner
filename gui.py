@@ -11,7 +11,8 @@ import threading
 import tkinter as tk
 import webbrowser
 from datetime import datetime
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
@@ -112,6 +113,59 @@ BRAND_STEPS = {
 }
 
 
+# --- old-phone -> new-phone file transfer ----------------------------------
+# The user's own folders live under /sdcard/ (== /storage/emulated/0/). We only
+# ever copy files — never contacts/messages/apps, which Android blocks over ADB
+# (that's what the phone's built-in "Copy apps & data" wizard is for).
+REMOTE_BASE = "/sdcard/"
+TRANSFER_FOLDERS = ("DCIM", "Pictures", "Movies", "Music", "Download", "Documents")
+# ponytail: one big timeout, no per-file progress. A phone full of photos can
+# take minutes; adb buffers its own progress so we only report totals at the end.
+# If users want a live bar, stream `adb pull` stderr instead of capturing it.
+TRANSFER_TIMEOUT = 3600
+# Written into a save folder only after every folder pulled cleanly; its absence
+# means the save was interrupted (crash, cable, timeout) and may be partial.
+TRANSFER_DONE_MARK = ".complete"
+
+
+def _pull_media(adb, dest):
+    """Copy the standard user folders off the phone into `dest`.
+
+    Returns (saved, skipped, failed) folder-name lists. A folder that isn't on
+    this phone is skipped — not an error. Any OTHER failure (cable pulled,
+    timeout, disk full) lands in `failed`; a failed folder may be PARTIALLY
+    copied on disk, so callers must never report success while `failed` is
+    non-empty — a tech may wipe the old phone on that signal.
+    """
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    saved, skipped, failed = [], [], []
+    for name in TRANSFER_FOLDERS:
+        try:
+            adb.pull(REMOTE_BASE + name, str(dest), timeout=TRANSFER_TIMEOUT)
+            saved.append(name)
+        except AdbError as e:
+            # adb's message for a missing remote folder is
+            # "remote object '/sdcard/X' does not exist" — anything else is real.
+            (skipped if "does not exist" in str(e).lower() else failed).append(name)
+    return saved, skipped, failed
+
+
+def _push_media(adb, src):
+    """Copy each subfolder of a saved transfer folder back onto the phone."""
+    src = Path(src)
+    pushed, failed = [], []
+    for child in sorted(src.iterdir()):
+        if not child.is_dir():
+            continue  # ignore stray files; we only restore folders we saved
+        try:
+            adb.push(str(child), REMOTE_BASE, timeout=TRANSFER_TIMEOUT)
+            pushed.append(child.name)
+        except AdbError:
+            failed.append(child.name)
+    return pushed, failed
+
+
 class AdCleanerApp:
     def __init__(self, root):
         self.root = root
@@ -125,6 +179,7 @@ class AdCleanerApp:
         self.android = ""
         self.apps = []
         self.selected = None
+        self._last_transfer_dir = None  # set after a Step-1 save this session
         self.log = ActionLog()
         self.ui_queue = queue.Queue()
         self.alive = True
@@ -292,6 +347,7 @@ class AdCleanerApp:
         self._build_apps_tab(nb)
         self._build_history_tab(nb)
         self._build_device_tab(nb)
+        self._build_move_tab(nb)
         self._build_crashes_tab(nb)
         self._build_help_tab(nb)
         self.notebook = nb
@@ -511,6 +567,184 @@ class AdCleanerApp:
             self._enable_btn(b, False)
         self.dns_btns = (self.dns_on_btn, self.dns_off_btn)
         self._sync_dns_custom()
+
+    def _build_move_tab(self, nb):
+        tab = ttk.Frame(nb, padding=18)
+        nb.add(tab, text="Move to new phone")
+        ttk.Label(tab, text="Move to a new phone", font=(FONT, 14, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Copies your photos, videos, music and downloads from an old "
+                            "phone to a new one, using this PC in between. Nothing is "
+                            "deleted from either phone.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 14))
+
+        ttk.Label(tab, text="Step 1 — plug in the OLD phone, then press Save",
+                  font=(FONT, 12, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Copies DCIM (camera), Pictures, Movies, Music, Downloads and "
+                            "Documents onto this computer.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 6))
+        self.move_save_btn = self._flat_button(
+            tab, "⬇  Save photos & files to this PC", self.on_move_save, GREEN, GREEN_HOT)
+        self.move_save_btn.pack(anchor="w", pady=(0, 16))
+
+        ttk.Label(tab, text="Step 2 — unplug the old phone, plug in the NEW phone, press Copy",
+                  font=(FONT, 12, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Puts the saved photos and files onto the new phone.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 6))
+        self.move_copy_btn = self._flat_button(
+            tab, "⬆  Copy onto the new phone", self.on_move_copy, SLATE, SLATE_HOT)
+        self.move_copy_btn.pack(anchor="w", pady=(0, 8))
+        self.move_status = tk.StringVar(value="")
+        ttk.Label(tab, textvariable=self.move_status, style="Muted.TLabel",
+                  wraplength=820, justify="left").pack(anchor="w")
+
+        self.move_btns = (self.move_save_btn, self.move_copy_btn)
+        for b in self.move_btns:
+            self._enable_btn(b, False)
+
+        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(18, 12))
+        ttk.Label(tab, text="📇  Contacts, messages & apps",
+                  font=(FONT, 12, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="These can't move over the USB cable — Android protects them. "
+                            "The easy, built-in way:\n"
+                            "•  Contacts & calendar: sign into the same Google account on the "
+                            "new phone and they come back on their own.\n"
+                            "•  Apps, texts and the rest: use the new phone's own “Copy apps "
+                            "& data” wizard during setup (on Samsung it's “Smart Switch”). "
+                            "It moves the lot, with a cable between the two phones — no PC "
+                            "needed.",
+                  style="Muted.TLabel", wraplength=820, justify="left").pack(
+            anchor="w", pady=(2, 8))
+        self._flat_button(tab, "🔗  How to move contacts & apps (opens a guide)",
+                          self.on_move_guide, SLATE, SLATE_HOT).pack(anchor="w")
+
+    def on_move_save(self):
+        if self.busy or not self.serial:
+            return
+        base = self.model or self.serial or "phone"
+        safe = "".join(c if c.isalnum() else "_" for c in base).strip("_") or "phone"
+        dest = data_dir() / "transfers" / f"{safe}_{datetime.now():%Y%m%d_%H%M%S}"
+        self.busy = True
+        for b in self.move_btns:
+            self._enable_btn(b, False)
+        self.move_status.set("Copying photos and files to this PC… this can take several "
+                             "minutes for a phone full of photos. Please leave it plugged in.")
+        self.status_line("Saving files from the phone…")
+
+        def work():
+            try:
+                saved, skipped, failed = _pull_media(self.adb, dest)
+                if not failed:
+                    (dest / TRANSFER_DONE_MARK).write_text("ok", encoding="utf-8")
+                self._post(self._move_save_done, dest, saved, failed, None)
+            except Exception as e:
+                self._post(self._move_save_done, dest, [], [], str(e))
+
+        self._run_bg(work)
+
+    def _move_save_done(self, dest, saved, failed, err):
+        self.busy = False
+        for b in self.move_btns:
+            self._enable_btn(b, bool(self.serial))
+        if err:
+            self.move_status.set("")
+            self.status_line("Couldn't save the files. " + self._friendly(err), "error")
+            return
+        if failed:
+            # Partial save: never show the ✅ a tech would wipe the old phone on.
+            self.move_status.set(
+                f"⚠ Couldn't finish — {', '.join(failed)} did not copy"
+                + (f" ({', '.join(saved)} did)" if saved else "") + ".\n"
+                "Do NOT wipe or trade in the old phone yet. Check the cable and "
+                "press Save again — a fresh folder will be made.")
+            self.status_line("Saving did not finish. Check the cable and try again.",
+                             "error")
+            return
+        if not saved:
+            self.move_status.set("Nothing was found to copy on this phone.")
+            self.status_line("No photos or files found to copy.", "error")
+            return
+        self._last_transfer_dir = dest
+        self.move_status.set(f"✅ Saved {', '.join(saved)} to:\n{dest}\n\n"
+                             "Now unplug this phone, plug in the NEW phone, and press "
+                             "“Copy onto the new phone”.")
+        self.status_line(f"✅ Saved {len(saved)} folder(s) to {dest}", "good")
+
+    def on_move_copy(self):
+        if self.busy or not self.serial:
+            return
+        src = self._last_transfer_dir
+        if not src:
+            (data_dir() / "transfers").mkdir(parents=True, exist_ok=True)
+            chosen = filedialog.askdirectory(
+                title="Pick the folder you saved in Step 1",
+                initialdir=str(data_dir() / "transfers"))
+            if not chosen:
+                return
+            src = Path(chosen)
+        # Guard the picker path: a Step-1 folder only ever contains the standard
+        # folder names. Picking the transfers/ ROOT (every past customer's saves)
+        # or some random huge folder must not end up on the phone.
+        try:
+            subdirs = [d.name for d in src.iterdir() if d.is_dir()]
+        except OSError:
+            subdirs = []
+        if not subdirs or any(name not in TRANSFER_FOLDERS for name in subdirs):
+            messagebox.showwarning(
+                "Pick the saved folder",
+                "That doesn't look like a folder saved in Step 1.\n\n"
+                "Open the “transfers” folder and pick ONE of the dated folders "
+                "inside it (the name starts with the old phone's model).")
+            return
+        warn = ("" if (src / TRANSFER_DONE_MARK).exists() else
+                "\n\n⚠ This save may not have finished — some files could be missing.")
+        if not messagebox.askyesno(
+                "Copy onto the new phone",
+                f"Copy the photos and files from\n\n{src}\n\nonto "
+                f"“{self.model or self.serial}” (the phone plugged in now)?\n\n"
+                f"Make sure this is the NEW phone.{warn}", default="yes"):
+            return
+        self.busy = True
+        for b in self.move_btns:
+            self._enable_btn(b, False)
+        self.move_status.set("Copying onto the new phone… this can take several minutes. "
+                             "Please leave the phone plugged in.")
+        self.status_line("Copying files onto the phone…")
+
+        def work():
+            try:
+                pushed, failed = _push_media(self.adb, src)
+                self._post(self._move_copy_done, pushed, failed, None)
+            except Exception as e:
+                self._post(self._move_copy_done, [], [], str(e))
+
+        self._run_bg(work)
+
+    def _move_copy_done(self, pushed, failed, err):
+        self.busy = False
+        for b in self.move_btns:
+            self._enable_btn(b, bool(self.serial))
+        if err:
+            self.move_status.set("")
+            self.status_line("Couldn't copy onto the phone. " + self._friendly(err), "error")
+            return
+        if not pushed:
+            self.move_status.set("Nothing was copied — the saved folder was empty."
+                                 if not failed else
+                                 "Couldn't copy " + ", ".join(failed) + " — try again.")
+            self.status_line("Nothing was copied.", "error")
+            return
+        note = (f"  ⚠ Couldn't copy: {', '.join(failed)} — press Copy again to retry."
+                if failed else "")
+        if not failed:
+            self._last_transfer_dir = None  # done; next customer gets the picker
+        self.move_status.set(f"✅ Copied {', '.join(pushed)} onto the new phone.{note} "
+                             "Open the Gallery on the phone to check your photos.")
+        self.status_line(f"✅ Copied {len(pushed)} folder(s) onto the new phone.",
+                         "good" if not failed else "info")
+
+    def on_move_guide(self):
+        webbrowser.open(
+            "https://www.google.com/search?q=copy+apps+and+data+to+new+android+phone")
 
     def _build_crashes_tab(self, nb):
         tab = ttk.Frame(nb, padding=18)
@@ -802,7 +1036,7 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, True)
         self._enable_btn(self.clean_btn, True)
         self._enable_btn(self.stop_btn, True)
-        for b in self.bulk_btns + self.dev_btns + self.dns_btns:
+        for b in self.bulk_btns + self.dev_btns + self.dns_btns + self.move_btns:
             self._enable_btn(b, True)
         self._enable_btn(self.crash_btn, True)
         self._refresh_device()
@@ -820,7 +1054,7 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, False)
         self._enable_btn(self.clean_btn, False)
         self._enable_btn(self.stop_btn, False)
-        for b in self.bulk_btns + self.dev_btns + self.dns_btns:
+        for b in self.bulk_btns + self.dev_btns + self.dns_btns + self.move_btns:
             self._enable_btn(b, False)
         self._enable_btn(self.crash_btn, False)
         for v in self.dev_vars.values():

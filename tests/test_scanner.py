@@ -53,6 +53,8 @@ class FakeAdb:
             return fx("packages_uids.txt")
         if args == ["dumpsys", "netstats"]:
             return fx("netstats.txt")
+        if args == ["dumpsys", "usagestats"]:
+            return fx("usagestats.txt")
         # Real device subcommand is `get-role-holders` (NOT `holders`); serving it
         # only under the correct name catches a regression to the broken command.
         if args[:3] == ["cmd", "role", "get-role-holders"]:
@@ -320,6 +322,13 @@ def test_build_inventory_attaches_data_use():
     # a package with no uid match / no netstats entry stays at the zero default.
     assert apps["com.spotify.music"].uid == 0
     assert apps["com.spotify.music"].data_mb == 0
+
+
+def test_build_inventory_attaches_used_min():
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert apps["com.random.freegift"].used_min == 4
+    # a package with no usagestats entry stays at the zero default.
+    assert apps["com.spotify.music"].used_min == 0
 
 
 def test_parse_pkg_uids():

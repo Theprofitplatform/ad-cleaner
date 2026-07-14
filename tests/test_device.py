@@ -82,3 +82,10 @@ def test_parse_data_use_sums_buckets_per_uid():
     assert use[10231] == 52428800 + 1048576 + 31457280 + 524288
     assert use[10145] == 2097152 + 1024
     assert device.parse_data_use("") == {}
+
+
+def test_parse_usage_minutes():
+    use = device.parse_usage_minutes(fx("usagestats.txt"))
+    assert use["com.whatsapp"] == 62
+    assert use["com.random.freegift"] == 4
+    assert device.parse_usage_minutes("junk") == {}

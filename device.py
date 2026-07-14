@@ -74,6 +74,21 @@ def parse_data_use(text):
     return use
 
 
+def parse_usage_minutes(text):
+    """`dumpsys usagestats` -> {package: foreground minutes}. Format is
+    unstable across OEMs; matches both h:mm:ss and mm:ss time strings and
+    keeps the largest value seen per package."""
+    use = {}
+    for m in re.finditer(
+            r'package=(\S+)[^\n]*?totalTime(?:Used|Visible)="(?:(\d+):)?(\d+):(\d+)"',
+            text or ""):
+        pkg = m.group(1)
+        h = int(m.group(2) or 0)
+        mins = h * 60 + int(m.group(3))
+        use[pkg] = max(use.get(pkg, 0), mins)
+    return use
+
+
 def read_battery_report(adb, uid_map=None):
     stats = _safe(adb, ["dumpsys", "batterystats", "--charged"])
     if uid_map is None:

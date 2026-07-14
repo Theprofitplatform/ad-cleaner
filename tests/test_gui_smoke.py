@@ -504,3 +504,21 @@ def test_battery_health_zero_shows_no_data(root, monkeypatch, tmp_path):
     pump(root, 1.5)
     app._show_battery_report({"top_drainers": [], "health_pct": 0})
     assert app.dev_vars["battery_health"].get() == "—"
+
+
+def test_receipt_most_used_strips_package_suffix_from_label(root, monkeypatch, tmp_path):
+    """Receipt most_used line strips the package suffix from prettified labels."""
+    from scanner import prettify_label
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    # Create an app with a prettified label like "Flashlight (com.foo.flashlight)"
+    prettified_label = prettify_label("com.foo.flashlight")
+    a = App(package="com.foo.flashlight", label=prettified_label, used_min=62)
+    app.apps = [a]
+    receipt_path = app._save_receipt({})  # empty result dict, we only care about most_used
+    assert receipt_path, "receipt should be written"
+    text = receipt_path.read_text(encoding="utf-8")
+    # Should contain "Flashlight (62 min)", NOT "Flashlight (com.foo.flashlight) (62 min)"
+    assert "Flashlight (62 min)" in text, f"expected 'Flashlight (62 min)' in receipt, got:\n{text}"
+    assert "flashlight) (62 min)" not in text, f"should not have doubled parens, got:\n{text}"

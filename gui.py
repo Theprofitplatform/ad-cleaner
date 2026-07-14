@@ -1268,6 +1268,9 @@ class AdCleanerApp:
         if a.data_mb >= 1:
             lines.append("")
             lines.append(f"Data used: {a.data_mb} MB")
+        if a.used_min:
+            lines.append("")
+            lines.append(f"Used about {a.used_min} min recently")
         if STALKER_REASON in a.reasons:
             lines.append("")
             lines.append("⚠ This looks like a hidden tracking app. Ask the customer "
@@ -1650,6 +1653,11 @@ class AdCleanerApp:
             if self.battery_report and self.battery_report["health_pct"]:
                 receipt["battery_health"] = (
                     f"{self.battery_report['health_pct']}% of original capacity")
+            top_used = sorted((a for a in self.apps if a.used_min > 0),
+                               key=lambda a: -a.used_min)[:3]
+            if top_used:
+                receipt["most_used"] = ", ".join(
+                    f"{a.label.split(' (')[0] or a.package} ({a.used_min} min)" for a in top_used)
             folder = data_dir() / "reports"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"receipt_{datetime.now():%Y%m%d_%H%M%S}.html"

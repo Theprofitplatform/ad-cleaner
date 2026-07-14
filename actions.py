@@ -11,7 +11,7 @@ from pathlib import Path
 
 from adb import AdbError, data_dir
 from protected import is_protected
-from scanner import parse_disabled
+from scanner import REASONS, parse_disabled
 
 UNDOABLE = {"pause", "uninstall", "block-popup"}
 
@@ -160,6 +160,23 @@ def stop_all(adb, apps, log, block_popups=False, progress=None):
 
 SUSPICIOUS = ("HIGH", "Medium")
 
+# The nuisance signal is a NAME heuristic; on its own it means "worth a look",
+# not "act" -- real apps match it (AVG's package id is literally
+# com.antivirus). score_app encodes "name was the only signal" as exactly this
+# reasons list. ponytail: list comparison, not a new App flag.
+_NUISANCE_ONLY = [REASONS["nuisance"]]
+
+
+def will_clean(app):
+    """True if one-click clean (big green button / Shop mode) may auto-act on
+    this app: suspicious and not protected -- EXCEPT a Medium whose only
+    evidence is a junk-looking name. That stays flagged in the Apps tab for a
+    human to bulk-pause/uninstall deliberately, but is never cleaned unattended.
+    """
+    if app.risk not in SUSPICIOUS or app.protected:
+        return False
+    return not (app.risk == "Medium" and app.reasons == _NUISANCE_ONLY)
+
 
 def clean_risky(adb, apps, log, progress=None, remove=False):
     """One-click clean (used by the big green button / Shop mode).
@@ -167,6 +184,7 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
     Closes every downloaded app and blocks pop-up permissions on all of them,
     then acts on every suspicious (HIGH or Medium) non-protected app -- Medium
     catches the Play-Store "cleaner/booster" pop-up apps that aren't sideloaded.
+    The one exception: nuisance-name-only Mediums are skipped (see will_clean).
 
     remove=False -> PAUSE the apps (reversible, nothing deleted).
     remove=True  -> UNINSTALL them (restorable via History / install-existing).
@@ -177,7 +195,7 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
     stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
     acted = []
     for app in apps:
-        if app.risk not in SUSPICIOUS or app.protected:
+        if not will_clean(app):
             continue
         try:
             if remove:

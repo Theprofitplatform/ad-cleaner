@@ -18,7 +18,7 @@ from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky,
     clear_caches, clear_private_dns, pause, read_private_dns, reboot, reset_app_data,
-    resume, set_private_dns, stop_all, undo, uninstall,
+    resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
 from crashes import read_crash_report, summarize
 from device import read_device_stats
@@ -1107,7 +1107,7 @@ class AdCleanerApp:
             self._pending_clean = False
             self._start_clean()
         elif self.shop_mode.get():
-            if any(a.risk in SUSPICIOUS and not a.protected for a in apps):
+            if any(will_clean(a) for a in apps):
                 self._start_clean()
             else:
                 self._set_summary("✅  Clean — unplug and connect the next phone.", "good")
@@ -1266,9 +1266,14 @@ class AdCleanerApp:
         names = "\n".join("     •  " + a.label.split(" (")[0] for a in apps[:10])
         if len(apps) > 10:
             names += f"\n     •  …and {len(apps) - 10} more"
+        # Select all with the risky filter off ticks EVERYTHING, so call out how
+        # many of these the scan thinks are fine (WhatsApp, banking, ...).
+        safe = sum(1 for a in apps if a.risk not in SUSPICIOUS)
+        warn = (f"\n\n⚠ {safe} of these look SAFE (Low risk). Uncheck them "
+                "unless you mean it." if safe else "")
         return messagebox.askyesno(
             f"{verb} {len(apps)} app(s)",
-            f"{verb} these {len(apps)} app(s)?\n\n{names}\n\n{note}", default="no")
+            f"{verb} these {len(apps)} app(s)?\n\n{names}{warn}\n\n{note}", default="no")
 
     def on_pause(self):
         apps = [a for a in self._actionable_selection() if a.enabled]
@@ -1459,7 +1464,7 @@ class AdCleanerApp:
             return None
 
     def _start_clean(self):
-        risky = [a for a in self.apps if a.risk in SUSPICIOUS and not a.protected]
+        risky = [a for a in self.apps if will_clean(a)]
         n = len(risky)
         remove = self.uninstall_mode.get()
         verb = "Uninstall" if remove else "Pause"

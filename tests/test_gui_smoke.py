@@ -85,6 +85,8 @@ class FakeAdb:
             return ""
         if args == ["pm", "list", "packages", "-d"]:
             return "".join(f"package:{p}\n" for p in self.disabled)
+        if args == ["pm", "list", "packages", "-s"]:
+            return "package:com.facebook.appmanager\n"
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
         return ""
@@ -383,6 +385,15 @@ def test_stalkerware_caution_shown_in_detail(root, monkeypatch, tmp_path):
     app.tree.selection_set("com.thetruthspy"); app._on_select()
     pump(root, 0.1)
     assert "hidden tracking app" in app.detail_reasons["text"]
+
+
+def test_debloat_disables_preinstalled_junk(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.on_debloat()
+    pump(root, 1.0)
+    assert "com.facebook.appmanager" in app.adb.disabled
 
 
 def test_chrome_popup_quickfix_blocks_notifications(root, monkeypatch, tmp_path):

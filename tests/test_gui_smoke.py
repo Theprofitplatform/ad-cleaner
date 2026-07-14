@@ -17,6 +17,7 @@ TINY_PNG = base64.b64decode(
 tkinter = pytest.importorskip("tkinter")
 import gui
 from actions import ActionLog
+from adb import AdbError
 from scanner import App, score_app
 
 NOW = datetime(2024, 6, 1)
@@ -346,3 +347,21 @@ def test_fix_roles_button_restores_and_updates_detail(root, monkeypatch, tmp_pat
     app.on_fix_roles()
     pump(root, 1.0)
     assert a.hijacked_roles == []
+
+
+def test_fix_roles_button_clears_busy_on_adb_error(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+
+    def raise_adb_error(*a, **k):
+        raise AdbError("boom")
+
+    monkeypatch.setattr(gui, "fix_role", raise_adb_error)
+    a = App(package="com.random.freegift", installer=None, risk="HIGH",
+            hijacked_roles=["browser"])
+    app.apps = [a]; app._render_table()
+    app.tree.selection_set("com.random.freegift"); app._on_select()
+    app.on_fix_roles()
+    pump(root, 1.0)
+    assert app.busy is False

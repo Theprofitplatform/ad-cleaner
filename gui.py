@@ -1321,12 +1321,15 @@ class AdCleanerApp:
 
         def work():
             restored = []
-            for friendly in list(a.hijacked_roles):
-                role_id = ROLE_IDS.get(friendly)
-                if role_id:
-                    pkg = fix_role(self.adb, role_id, a.package, self.log)
-                    if pkg:
-                        restored.append(friendly)
+            try:
+                for friendly in list(a.hijacked_roles):
+                    role_id = ROLE_IDS.get(friendly)
+                    if role_id:
+                        pkg = fix_role(self.adb, role_id, a.package, self.log)
+                        if pkg:
+                            restored.append(friendly)
+            except AdbError:
+                pass
             self._post(self._fix_roles_done, a, restored)
 
         self.busy = True

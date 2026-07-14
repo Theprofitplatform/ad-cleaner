@@ -32,6 +32,7 @@ class FakeAdb:
         self.disabled = set()
         self.installed = {"com.random.adware", "com.google.android.gms"}
         self.calls = []
+        self.commands = []
         self.rebooted = False
         self.png = TINY_PNG
         self.globals = {}
@@ -57,6 +58,11 @@ class FakeAdb:
 
     def shell_text(self, args, timeout=10):
         self.calls.append(args)
+        self.commands.append(" ".join(args))
+        if args[:2] == ["pm", "revoke"]:
+            return ""
+        if args[:2] == ["appops", "set"] and "POST_NOTIFICATION" in args:
+            return ""
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return ""
         if args[:3] == ["pm", "uninstall", "--user"]:
@@ -365,3 +371,14 @@ def test_fix_roles_button_clears_busy_on_adb_error(root, monkeypatch, tmp_path):
     app.on_fix_roles()
     pump(root, 1.0)
     assert app.busy is False
+
+
+def test_chrome_popup_quickfix_blocks_notifications(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.on_chrome_popups()
+    pump(root, 1.0)
+    assert any("com.android.chrome" in c and
+               ("revoke" in c or "POST_NOTIFICATION" in c)
+               for c in app.adb.commands)

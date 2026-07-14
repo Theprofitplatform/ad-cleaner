@@ -120,6 +120,7 @@ class App:
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
+    play: dict | None = None          # Google Play lookup; filled by the GUI post-scan
 
     @property
     def protected(self):

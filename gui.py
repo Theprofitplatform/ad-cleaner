@@ -27,6 +27,9 @@ from report import render_history_html, render_receipt_html
 from scanner import ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
 
+import appicon
+import playstore
+
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
 BASE = "#ffffff"       # window / table background
@@ -439,9 +442,16 @@ class AdCleanerApp:
         detail.pack(fill="x", padx=6, pady=(8, 2))
         ttk.Label(detail, text="DETAILS", style="PanelMuted.TLabel",
                   font=(FONT, 10, "bold")).pack(anchor="w")
-        self.detail_title = ttk.Label(detail, text="Select an app to see details.",
+        head = ttk.Frame(detail, style="PanelFlat.TFrame")
+        head.pack(anchor="w", fill="x", pady=(2, 0))
+        self.detail_icon = ttk.Label(head, style="Panel.TLabel")
+        self.detail_icon.pack(side="left")
+        self._icon_img = None      # keep a ref or Tk garbage-collects the image
+        self._icon_cache = {}      # package -> icon path (or None = both sources failed)
+        self._icon_for = None      # package whose icon fetch is in flight
+        self.detail_title = ttk.Label(head, text="Select an app to see details.",
                                       style="Panel.TLabel", font=(FONT, 12, "bold"))
-        self.detail_title.pack(anchor="w", pady=(2, 0))
+        self.detail_title.pack(side="left", padx=(6, 0))
         self.detail_reasons = ttk.Label(detail, text="", style="Panel.TLabel",
                                         justify="left", wraplength=940)
         self.detail_reasons.pack(anchor="w", pady=(3, 10))
@@ -1116,6 +1126,7 @@ class AdCleanerApp:
         self.suspicious_var.set(risky > 0)   # auto-focus the risky ones if any exist
         self._render_table()
         self._show_summary(apps)
+        self._start_play_checks(apps)
         self.status_line(f"Scan complete: {len(apps)} downloaded apps, {risky} flagged.",
                          "good" if risky == 0 else "info")
         if self._pending_clean:
@@ -1149,17 +1160,19 @@ class AdCleanerApp:
             out.append(a)
         return out
 
+    def _row_values(self, a):
+        installed = a.first_install.strftime("%Y-%m-%d") if a.first_install else ""
+        why = (a.reasons[0] + (f"   +{len(a.reasons) - 1} more"
+                               if len(a.reasons) > 1 else "")) if a.reasons else ""
+        name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
+        risk = f"{RISK_DOT.get(a.risk, '')} {a.risk} ({a.score})"
+        return (name, a.package, risk, why, installed, a.source, a.status)
+
     def _render_table(self):
         self.tree.delete(*self.tree.get_children())
         for a in self._visible_apps():
-            installed = a.first_install.strftime("%Y-%m-%d") if a.first_install else ""
-            why = (a.reasons[0] + (f"   +{len(a.reasons) - 1} more"
-                                   if len(a.reasons) > 1 else "")) if a.reasons else ""
-            name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
-            risk = f"{RISK_DOT.get(a.risk, '')} {a.risk} ({a.score})"
             self.tree.insert("", "end", iid=a.package, tags=(a.risk,),
-                             values=(name, a.package, risk, why,
-                                     installed, a.source, a.status))
+                             values=self._row_values(a))
         # Never leave a blank grid — a clean phone must not look like a failure.
         if self.tree.get_children():
             self.tree_empty.place_forget()
@@ -1224,6 +1237,7 @@ class AdCleanerApp:
         self.selected = None
         self.detail_title.config(text="Select an app to see details.")
         self.detail_reasons.config(text="")
+        self._set_detail_icon(None)
         for b in self.detail_btns:
             self._enable_btn(b, False)
 
@@ -1233,6 +1247,7 @@ class AdCleanerApp:
             self._clear_detail()
             return
         self.detail_title.config(text=f"{a.label}  —  Risk: {a.risk} ({a.score})")
+        self._fetch_icon(a)
         if a.protected:
             self.detail_reasons.config(text="🔒 Protected system app — this one is kept safe "
                                             "and cannot be changed.")
@@ -1240,6 +1255,9 @@ class AdCleanerApp:
                 self._enable_btn(b, False)
             return
         lines = ["• " + r for r in a.reasons] or ["Nothing suspicious found."]
+        if a.play and a.play.get("listed") and a.play.get("name"):
+            lines.append(f"✔ On Google Play as “{a.play['name']}” — compare that name "
+                         "and icon with what the phone shows.")
         if a.sensitive_perms:
             lines.append("")
             lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
@@ -1256,6 +1274,74 @@ class AdCleanerApp:
         self._enable_btn(self.backup_btn, True)
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
         self._enable_btn(self.notif_btn, a.notif_count > 0)
+
+    # --- Google Play check + app icons (best effort, display-only) -----------
+
+    def _start_play_checks(self, apps):
+        """Ask Google Play about every scanned package, in the background.
+        Disk-cached, so repeat phones are instant; offline just means unknown.
+        Display-only: never touches score or the shop-mode clean decision.
+        ponytail: one sequential worker thread; pool it if the trickle annoys."""
+        def work():
+            for a in apps:
+                info = playstore.lookup(a.package)
+                if info:
+                    self._post(self._apply_play, a, info)
+        self._run_bg(work)
+
+    def _apply_play(self, a, info):
+        if a not in self.apps:          # a rescan replaced the list meanwhile
+            return
+        a.play = info
+        if (not info.get("listed") and not a.protected
+                and playstore.NOT_LISTED_REASON not in a.reasons):
+            a.reasons.append(playstore.NOT_LISTED_REASON)
+        if self.tree.exists(a.package):
+            self.tree.item(a.package, values=self._row_values(a))
+        if self.selected is a:
+            if self._icon_cache.get(a.package) is None:
+                self._icon_cache.pop(a.package, None)   # Play icon may work now
+            self._update_detail()
+
+    def _fetch_icon(self, a):
+        pkg = a.package
+        if pkg in self._icon_cache:
+            self._set_detail_icon(self._icon_cache[pkg])
+            return
+        self._set_detail_icon(None)
+        if self._icon_for == pkg:       # fetch already in flight
+            return
+        self._icon_for = pkg
+        adb, play = self.adb, a.play
+        def work():
+            path = appicon.device_icon(adb, pkg) if adb else None
+            if path is None and play and play.get("icon"):
+                data = playstore.fetch_icon(play["icon"])
+                if data:
+                    path = appicon.save_play_icon(pkg, data)
+            self._post(self._icon_done, pkg, path)
+        self._run_bg(work)
+
+    def _icon_done(self, pkg, path):
+        self._icon_cache[pkg] = path
+        if self._icon_for == pkg:
+            self._icon_for = None
+        if self.selected and self.selected.package == pkg:
+            self._set_detail_icon(path)
+
+    def _set_detail_icon(self, path):
+        img = None
+        if path:
+            try:
+                img = tk.PhotoImage(file=str(path))
+                # Pillow-less fallback icons come APK-sized; shrink to ~64px.
+                f = max(img.width(), img.height()) // 65 + 1
+                if f > 1:
+                    img = img.subsample(f, f)
+            except tk.TclError:
+                img = None
+        self._icon_img = img
+        self.detail_icon.config(image=img or "")
 
     # --- actions ------------------------------------------------------------
 

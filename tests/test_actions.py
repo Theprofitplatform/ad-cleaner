@@ -6,8 +6,8 @@ import actions
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role, pause,
-    read_private_dns, reboot, reset_app_data, resume, set_private_dns, stop_all, undo,
-    uninstall, will_clean,
+    read_private_dns, reboot, reset_app_data, restrict_background, resume, set_private_dns,
+    stop_all, undo, uninstall, will_clean,
 )
 from adb import AdbError
 from scanner import App, REASONS
@@ -368,3 +368,20 @@ def test_block_notifications_falls_back_to_appops(log):
     adb = OldAdb()
     assert block_notifications(adb, "com.random.freegift", log)
     assert "appops set com.random.freegift POST_NOTIFICATION ignore" in adb.commands
+
+
+def test_restrict_background_uses_netpolicy_and_undoes(log):
+    adb = FakeAdb()
+    assert restrict_background(adb, "com.random.freegift", 10231, log)
+    assert "cmd netpolicy add restrict-background-blacklist 10231" in adb.commands
+    entry = log.recent()[0]
+    assert can_undo(entry)
+    undo(adb, entry, log)
+    assert "cmd netpolicy remove restrict-background-blacklist 10231" in adb.commands
+
+
+def test_restrict_background_refuses_non_app_uid(log):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        restrict_background(adb, "com.x", 0, log)
+    assert not any("netpolicy" in c for c in adb.commands)

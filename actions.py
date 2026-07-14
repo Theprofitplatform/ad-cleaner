@@ -13,7 +13,8 @@ from adb import AdbError, data_dir
 from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
-UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications", "debloat"}
+UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications", "debloat",
+            "restrict-data"}
 
 
 class ProtectedAppError(Exception):
@@ -301,6 +302,17 @@ def block_notifications(adb, package, log):
     return True
 
 
+def restrict_background(adb, package, uid, log):
+    """Block the app's background mobile data (same as the per-app 'Background
+    data' toggle -- Wi-Fi unaffected). Refuses non-app uids; otherwise safe + reversible."""
+    if uid < 10000:
+        raise ProtectedAppError(f"refusing to restrict uid {uid} (not an app uid)")
+    cmd = ["cmd", "netpolicy", "add", "restrict-background-blacklist", str(uid)]
+    adb.shell_text(cmd)
+    log.append(adb.serial, package, "restrict-data", str(uid), cmd, "ok")
+    return True
+
+
 def backup_apk(adb, app, dest_dir):
     """Pull the app's APK(s) to dest_dir before removal. Returns saved file paths."""
     out = adb.shell_text(["pm", "path", app.package])
@@ -427,6 +439,9 @@ def undo(adb, entry, log):
             cmd = ["appops", "set", pkg, "POST_NOTIFICATION", "allow"]
         else:
             cmd = ["pm", "grant", pkg, "android.permission.POST_NOTIFICATIONS"]
+        adb.shell_text(cmd)
+    elif action == "restrict-data":
+        cmd = ["cmd", "netpolicy", "remove", "restrict-background-blacklist", entry["previous"]]
         adb.shell_text(cmd)
     else:
         raise AdbError("This action can't be undone.")

@@ -1,0 +1,3 @@
+  uid=10231 set=DEFAULT tag=0x0 rb=52428800 rp=1200 tb=1048576 tp=300
+  uid=10231 set=BACKGROUND tag=0x0 rb=31457280 rp=800 tb=524288 tp=100
+  uid=10145 set=DEFAULT tag=0x0 rb=2097152 rp=90 tb=1024 tp=10

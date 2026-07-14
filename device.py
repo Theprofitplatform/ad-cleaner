@@ -63,6 +63,17 @@ def parse_power_use(text):
     return sorted(rows, key=lambda r: -r[1])
 
 
+def parse_data_use(text):
+    """`dumpsys netstats` bucket lines -> {uid: total rx+tx bytes}. Defensive:
+    OEM formats vary; anything that doesn't match the uid/rb/tb shape is skipped."""
+    use = {}
+    for m in re.finditer(r"uid=(\d+)\b[^\n]*?\brb=(\d+)[^\n]*?\btb=(\d+)",
+                         text or ""):
+        uid = int(m.group(1))
+        use[uid] = use.get(uid, 0) + int(m.group(2)) + int(m.group(3))
+    return use
+
+
 def read_battery_report(adb, uid_map=None):
     stats = _safe(adb, ["dumpsys", "batterystats", "--charged"])
     if uid_map is None:
@@ -107,6 +118,9 @@ def demo():
 
     temp, level = parse_battery("  level: 85\n  temperature: 305\n  health: 2\n")
     assert temp == 30.5 and level == 85
+
+    use = parse_data_use("uid=10231 set=DEFAULT rb=100 tb=50\n")
+    assert use == {10231: 150} and parse_data_use("") == {}
     print("device.py demo OK")
 
 

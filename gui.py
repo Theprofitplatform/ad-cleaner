@@ -18,7 +18,8 @@ from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, fix_role, pause, read_private_dns,
-    reboot, reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
+    reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
+    uninstall, will_clean,
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
@@ -471,8 +472,11 @@ class AdCleanerApp:
                                              GREEN, GREEN_HOT)
         self.notif_btn = self._flat_button(btns, "🔕  Stop its notifications",
                                            self.on_block_notifs, AMBER, AMBER_HOT)
+        self.data_btn = self._flat_button(btns, "📵  Block background data",
+                                          self.on_restrict_data, AMBER, AMBER_HOT)
         self.detail_btns = (self.pause_btn, self.resume_btn, self.uninstall_btn,
-                            self.reset_btn, self.backup_btn, self.fixrole_btn, self.notif_btn)
+                            self.reset_btn, self.backup_btn, self.fixrole_btn, self.notif_btn,
+                            self.data_btn)
         for b in self.detail_btns:
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
@@ -1261,6 +1265,9 @@ class AdCleanerApp:
         if a.sensitive_perms:
             lines.append("")
             lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
+        if a.data_mb >= 1:
+            lines.append("")
+            lines.append(f"Data used: {a.data_mb} MB")
         if STALKER_REASON in a.reasons:
             lines.append("")
             lines.append("⚠ This looks like a hidden tracking app. Ask the customer "
@@ -1274,6 +1281,7 @@ class AdCleanerApp:
         self._enable_btn(self.backup_btn, True)
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
         self._enable_btn(self.notif_btn, a.notif_count > 0)
+        self._enable_btn(self.data_btn, a.uid >= 10000)
 
     # --- Google Play check + app icons (best effort, display-only) -----------
 
@@ -1471,6 +1479,29 @@ class AdCleanerApp:
             self.status_line("Couldn't stop notifications. " + self._friendly(err), "error")
         else:
             self.status_line(f"✅ Notifications stopped for {label}", "good")
+
+    def on_restrict_data(self):
+        a = self.selected
+        if not a or self.busy or not self.serial:
+            return
+        label = a.label.split(" (")[0]
+
+        def work():
+            try:
+                restrict_background(self.adb, a.package, a.uid, self.log)
+                self._post(self._restrict_data_done, label, None)
+            except (AdbError, ProtectedAppError) as e:
+                self._post(self._restrict_data_done, label, str(e))
+
+        self.busy = True
+        self._run_bg(work)
+
+    def _restrict_data_done(self, label, err):
+        self.busy = False
+        if err:
+            self.status_line("Couldn't block background data. " + self._friendly(err), "error")
+        else:
+            self.status_line(f"✅ Background data blocked for {label}", "good")
 
     def on_backup_apk(self):
         a = self.selected

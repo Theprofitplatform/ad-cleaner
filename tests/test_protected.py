@@ -114,6 +114,12 @@ def test_system_partition_beats_junk_and_blocklist():
     assert is_protected("com.oem.preinstalled.cleaner", None, is_system=True)
 
 
+def test_stalkerware_is_never_protected():
+    from stalkerware import is_stalkerware
+    assert is_stalkerware("com.thetruthspy")
+    assert not is_stalkerware("com.whatsapp")
+
+
 def test_named_essentials_immune_to_blocklist():
     # A stray blocklist.txt line must never unprotect Play Store / SystemUI:
     # the junk/blocklist override is fenced to the prefix rule only.

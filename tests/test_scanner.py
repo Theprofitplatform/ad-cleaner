@@ -305,3 +305,12 @@ def test_notif_spam_scored():
               first_install=datetime(2020, 1, 1), notif_count=5)
     score_app(app, NOW)
     assert scanner.REASONS["notif_spam"] in app.reasons
+
+
+def test_stalkerware_forced_high():
+    app = App(package="com.thetruthspy", installer=None,
+              first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert app.risk == "HIGH"
+    assert scanner.STALKER_REASON in app.reasons
+    assert not app.protected

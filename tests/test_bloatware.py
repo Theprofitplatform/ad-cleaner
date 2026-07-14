@@ -11,6 +11,10 @@ def _tmp_data_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(adb, "data_dir", lambda: tmp_path)
 
 
+def test_seed_excludes_carrier_config_adjacent_omcagent():
+    assert "com.samsung.android.app.omcagent" not in bloatware.BLOAT_SEED
+
+
 def test_find_bloat_matches_only_listed_system_packages(monkeypatch, tmp_path):
     class SysAdb(FakeAdb):
         def shell_text(self, args, timeout=10):

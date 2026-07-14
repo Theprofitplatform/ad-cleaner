@@ -1816,7 +1816,7 @@ class AdCleanerApp:
             try:
                 found = find_bloat(self.adb)
                 self._post(self._debloat_found, found, None)
-            except AdbError as e:
+            except Exception as e:
                 self._post(self._debloat_found, None, str(e))
 
         self._run_bg(work)
@@ -1848,7 +1848,7 @@ class AdCleanerApp:
                 try:
                     if debloat(self.adb, pkg, self.log):
                         done += 1
-                except (ProtectedAppError, AdbError):
+                except Exception:
                     pass
             self._post(self._debloat_done, done)
 

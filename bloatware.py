@@ -15,7 +15,9 @@ BLOAT_SEED = frozenset({
     "com.miui.msa.global",            # Xiaomi ad service
     "com.miui.analytics",
     "com.samsung.android.mateagent",  # Samsung promotion agent
-    "com.samsung.android.app.omcagent",
+    # com.samsung.android.app.omcagent deliberately excluded: carrier/region
+    # config delivery (VoLTE, Samsung Pay, regional settings) -- add per-device
+    # via bloatware.txt if a tech confirms it's safe to remove.
     # Lock-screen ads/content
     "com.glance.internet", "us.zoom.videomeetings.preload",
 })

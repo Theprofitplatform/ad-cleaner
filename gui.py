@@ -17,9 +17,10 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, fix_role, pause, read_private_dns, reboot,
-    reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
+    clean_risky, clear_caches, clear_private_dns, debloat, fix_role, pause, read_private_dns,
+    reboot, reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
 )
+from bloatware import find_bloat
 from crashes import read_crash_report, summarize
 from device import read_device_stats
 from report import render_history_html, render_receipt_html
@@ -534,8 +535,11 @@ class AdCleanerApp:
         self.popups_btn = self._flat_button(btns, "🚫  Stop fake virus pop-ups (Chrome)",
                                             self.on_chrome_popups, AMBER, AMBER_HOT)
         self.popups_btn.pack(side="left", padx=(8, 0))
+        self.bloat_btn = self._flat_button(btns, "💤  Disable preinstalled junk",
+                                           self.on_debloat, AMBER, AMBER_HOT)
+        self.bloat_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
-                         self.reboot_btn, self.popups_btn)
+                         self.reboot_btn, self.popups_btn, self.bloat_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1797,6 +1801,62 @@ class AdCleanerApp:
                              "error")
         else:
             self.status_line("✅ Chrome notifications stopped.", "good")
+
+    def on_debloat(self):
+        """Find + disable preinstalled junk (carrier installers, OEM ad
+        services, Facebook preload stubs) from the curated bloatware list.
+        Disable-only, never uninstall -- see bloatware.py. Undo works from
+        the History tab like every other logged action."""
+        if self.busy or not self.serial:
+            return
+        self.busy = True
+        self.status_line("Checking for preinstalled junk…")
+
+        def work():
+            try:
+                found = find_bloat(self.adb)
+                self._post(self._debloat_found, found, None)
+            except Exception as e:
+                self._post(self._debloat_found, None, str(e))
+
+        self._run_bg(work)
+
+    def _debloat_found(self, found, err):
+        self.busy = False
+        if err:
+            self.status_line("Couldn't check for preinstalled junk. " + self._friendly(err),
+                             "error")
+            return
+        if not found:
+            self.status_line("No known preinstalled junk on this phone.", "good")
+            return
+        names = "\n".join("     •  " + p for p in found[:10])
+        if len(found) > 10:
+            names += f"\n     •  …and {len(found) - 10} more"
+        if not messagebox.askyesno(
+                f"Disable {len(found)} preinstalled app(s)",
+                f"Disable these {len(found)} preinstalled app(s)?\n\n{names}\n\n"
+                "They stop running immediately. Reversible any time from the History tab.",
+                default="no"):
+            return
+        self.busy = True
+        self.status_line(f"Disabling {len(found)} preinstalled app(s)…")
+
+        def work():
+            done = 0
+            for pkg in found:
+                try:
+                    if debloat(self.adb, pkg, self.log):
+                        done += 1
+                except Exception:
+                    pass
+            self._post(self._debloat_done, done)
+
+        self._run_bg(work)
+
+    def _debloat_done(self, done):
+        self.busy = False
+        self.status_line(f"✅ Disabled {done} preinstalled junk app(s).", "good")
 
     # --- Private DNS (system-wide ad blocking) -------------------------------
 

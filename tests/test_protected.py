@@ -1,4 +1,7 @@
-from protected import is_from_known_store, is_protected, is_spoof
+from protected import (
+    extend_blocklist, is_blocked, is_from_known_store, is_protected, is_spoof,
+    looks_like_junk,
+)
 
 
 def test_genuine_store_system_app_is_protected():
@@ -50,3 +53,36 @@ def test_exact_essential_name_from_sideload_installer_is_spoof():
     # Store name delivered by the generic sideload installer -> spoof, not protected.
     assert not is_protected("com.android.vending", "com.google.android.packageinstaller")
     assert is_spoof("com.android.vending", "com.google.android.packageinstaller")
+
+
+def test_looks_like_junk():
+    assert looks_like_junk("com.phone.cleaner.shineapps")
+    assert looks_like_junk("smart.cleaner.smart")
+    assert looks_like_junk("com.sec.reclean")            # 'clean' substring
+    assert looks_like_junk("com.d4rk.cleaner")
+    assert not looks_like_junk("com.spotify.music")
+    assert not looks_like_junk("com.google.android.apps.photos")
+    assert not looks_like_junk("org.zwanoo.android.speedtest")  # 'speed' not a word
+    # A legit app that merely contains 'wrapper' must NOT be flagged (bet365's
+    # official package is com.bet365Wrapper.Bet365_Application).
+    assert not looks_like_junk("com.bet365Wrapper.Bet365_Application")
+
+
+def test_junk_named_system_lookalike_is_not_protected():
+    # 'com.sec.reclean' matches the com.sec. prefix + store installer, which used
+    # to whitelist it as a genuine Samsung app. A junk name overrides that.
+    assert not is_protected("com.sec.reclean", "com.android.vending")
+    # A real Samsung system package (no junk word) stays protected.
+    assert is_protected("com.sec.android.app.kidshome", None)
+
+
+def test_blocklist():
+    assert is_blocked("com.cleanmaster.mguard")          # bundled seed
+    assert not is_blocked("com.spotify.music")
+    extend_blocklist(["com.some.fake.app", "# a comment", "  ",
+                      "com.inline.commented   # trailing note"])
+    assert is_blocked("com.some.fake.app")
+    assert is_blocked("com.inline.commented")  # inline comment stripped
+    # A blocklisted id is never protected even with a system-style name.
+    extend_blocklist(["com.sec.somejunk"])
+    assert not is_protected("com.sec.somejunk", "com.android.vending")

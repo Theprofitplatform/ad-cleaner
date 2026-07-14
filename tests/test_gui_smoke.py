@@ -223,6 +223,28 @@ def test_bulk_uninstall_multi_select(root, monkeypatch, tmp_path):
     assert app._app_by_pkg("com.junk.one") is None
 
 
+def test_select_all_then_bulk_pause(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    # bulk-action buttons come alive once a phone is connected
+    assert str(app.selectall_btn["state"]) == "normal"
+    assert str(app.bulk_pause_btn["state"]) == "normal"
+    assert str(app.bulk_uninstall_btn["state"]) == "normal"
+    a1 = App(package="com.junk.one", installer=None, risk="HIGH")
+    a2 = App(package="com.junk.two", installer=None, risk="HIGH")
+    app.apps = [a1, a2]
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.on_select_all()                       # ticks every visible row
+    pump(root, 0.1)
+    assert set(app.tree.selection()) == {"com.junk.one", "com.junk.two"}
+    app.on_pause()                            # bulk pause the whole selection
+    pump(root, 1.0)
+    assert "com.junk.one" in app.adb.disabled
+    assert "com.junk.two" in app.adb.disabled
+
+
 def test_reset_data_from_detail(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

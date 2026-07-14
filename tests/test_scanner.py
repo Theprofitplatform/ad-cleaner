@@ -36,6 +36,10 @@ class FakeAdb:
             return fx(f"dumpsys_{args[2]}.txt")
         if args[:2] == ["cmd", "package"]:  # query-activities (launchers)
             return fx("launchers.txt")
+        # Real device subcommand is `get-role-holders` (NOT `holders`); serving it
+        # only under the correct name catches a regression to the broken command.
+        if args[:3] == ["cmd", "role", "get-role-holders"]:
+            return "com.random.freegift\n" if args[3] == "android.app.role.BROWSER" else ""
         return ""
 
 
@@ -143,6 +147,23 @@ def test_role_hijack_scored_with_named_defaults():
     assert app.score == 40  # sideloaded 25 + role_hijack 15
 
 
+def test_nuisance_cleaner_from_store_is_medium():
+    # A Play-Store cleaner with no dangerous perms would otherwise score 0.
+    app = App(package="com.phone.cleaner.shineapps", installer="com.android.vending",
+              label="cleaner", first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert scanner.REASONS["nuisance"] in app.reasons
+    assert app.risk == "Medium" and app.score == 30
+
+
+def test_blocklisted_app_forced_high():
+    app = App(package="com.cleanmaster.mguard", installer="com.android.vending",
+              first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert app.risk == "HIGH"
+    assert scanner.BLOCKED_REASON in app.reasons
+
+
 # --- Label + heuristic tests ------------------------------------------------
 
 def test_prettify_label():
@@ -220,6 +241,14 @@ def test_build_inventory_scores_whole_device():
     # Highest risk sorts first.
     ordered = build_inventory(FakeAdb(), now=NOW)
     assert ordered[0].score >= ordered[-1].score
+
+
+def test_build_inventory_detects_role_hijack():
+    # Regression: the role query must use `cmd role get-role-holders`. The old
+    # `cmd role holders` is rejected by the device ("Unknown command"), which
+    # silently zeroed every UI-takeover detection (home/browser/sms/dialer).
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    assert apps["com.random.freegift"].hijacked_roles == ["browser"]
 
 
 def test_build_inventory_marks_overlay_from_appops():

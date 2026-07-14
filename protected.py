@@ -50,6 +50,50 @@ PROTECTED_EXACT = frozenset({
 })
 
 
+# --- Junk / fake-app heuristics ---------------------------------------------
+# Consumer nuisanceware categories: cleaners, boosters, optimizers, and
+# repackaged fakes ("wrapper"). Substring match on the lowercased package/label.
+# ponytail: heuristic knob, not a classifier -- a hit means "worth review", not
+# "malware". Tune the words; keep them specific enough to avoid legit apps
+# (e.g. "speed" is omitted so Ookla Speedtest isn't flagged).
+JUNK_WORDS = (
+    "cleaner", "clean", "booster", "boost", "optimizer", "optimize",
+    "speedup", "junk", "antivirus",
+)
+
+# Known-bad package ids (exact match) -> forced HIGH. Seed of notorious
+# nuisanceware; extend per-device via adcleaner_data/blocklist.txt (loaded in
+# scanner.build_inventory -> extend_blocklist). ponytail: bundled seed + user
+# file is the whole "blocklist" feature; no online feed until one is asked for.
+_BLOCKLIST = {
+    "com.cleanmaster.mguard",           # Clean Master
+    "com.cleanmaster.security",
+    "com.dianxinos.optimizer.duplay",   # DU Speed Booster
+    "com.qihoo.security",               # 360 Security
+    "com.ijinshan.kbatterydoctor_en",   # Battery Doctor
+}
+
+
+def looks_like_junk(package, label=None):
+    """True if the package/label reads as a junk cleaner/booster or repackaged fake."""
+    hay = (package + " " + (label or "")).lower()
+    return any(w in hay for w in JUNK_WORDS)
+
+
+def is_blocked(package):
+    """True if the package is on the known-bad blocklist."""
+    return package in _BLOCKLIST
+
+
+def extend_blocklist(ids):
+    """Merge extra package ids into the blocklist. Each item may carry an inline
+    or whole-line '#' comment, which is stripped."""
+    for raw in ids:
+        pkg = raw.split("#", 1)[0].strip()
+        if pkg:
+            _BLOCKLIST.add(pkg)
+
+
 def is_from_known_store(installer):
     """True if the installer package is a trusted app store."""
     return installer in KNOWN_STORES
@@ -93,7 +137,16 @@ def is_spoof(package, installer, is_system=False):
 def is_protected(package, installer=None, is_system=False):
     """Return True if this package must never be paused/stopped/uninstalled:
     a genuine system/OEM app. Impersonators are NOT protected (see is_spoof).
+
+    A real system-partition app (is_system) is always protected. A third-party
+    app that only *looks* system by name (e.g. 'com.sec.reclean') but is a known
+    junk id or has a junk/fake name is NOT protected -- otherwise the prefix rule
+    would whitelist nuisanceware wearing a system-style name.
     """
+    if is_system:
+        return True
+    if is_blocked(package) or looks_like_junk(package):
+        return False
     return is_genuine_system(package, installer, is_system)
 
 

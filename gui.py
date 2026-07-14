@@ -314,6 +314,20 @@ class AdCleanerApp:
         self.suspicious_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(bar, text="Show risky apps only", variable=self.suspicious_var,
                         command=self._render_table).pack(side="left", padx=12)
+        # Bulk actions: Select all ticks every row currently shown (so it honours the
+        # "risky only" filter + search), then Pause/Uninstall act on the selection.
+        self.selectall_btn = self._flat_button(bar, "☑  Select all", self.on_select_all,
+                                               SLATE, SLATE_HOT)
+        self.selectall_btn.pack(side="left", padx=(4, 4))
+        self.bulk_pause_btn = self._flat_button(bar, "⏸  Pause", self.on_pause,
+                                                AMBER, AMBER_HOT)
+        self.bulk_pause_btn.pack(side="left", padx=4)
+        self.bulk_uninstall_btn = self._flat_button(bar, "🗑  Uninstall", self.on_uninstall,
+                                                    RED, RED_HOT)
+        self.bulk_uninstall_btn.pack(side="left", padx=4)
+        self.bulk_btns = (self.selectall_btn, self.bulk_pause_btn, self.bulk_uninstall_btn)
+        for b in self.bulk_btns:
+            self._enable_btn(b, False)
         ttk.Checkbutton(bar, text="🔁  Shop mode (auto-clean each phone)",
                         variable=self.shop_mode,
                         command=self._toggle_shop).pack(side="right", padx=8)
@@ -788,7 +802,7 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, True)
         self._enable_btn(self.clean_btn, True)
         self._enable_btn(self.stop_btn, True)
-        for b in self.dev_btns + self.dns_btns:
+        for b in self.bulk_btns + self.dev_btns + self.dns_btns:
             self._enable_btn(b, True)
         self._enable_btn(self.crash_btn, True)
         self._refresh_device()
@@ -806,7 +820,7 @@ class AdCleanerApp:
         self._enable_btn(self.rescan_btn, False)
         self._enable_btn(self.clean_btn, False)
         self._enable_btn(self.stop_btn, False)
-        for b in self.dev_btns + self.dns_btns:
+        for b in self.bulk_btns + self.dev_btns + self.dns_btns:
             self._enable_btn(b, False)
         self._enable_btn(self.crash_btn, False)
         for v in self.dev_vars.values():
@@ -946,6 +960,16 @@ class AdCleanerApp:
         sel = self.tree.selection()
         self.selected = self._app_by_pkg(sel[0]) if sel else None
         self._update_detail()
+
+    def on_select_all(self):
+        """Tick every row currently shown in the table (respects the active filter)."""
+        items = self.tree.get_children()
+        if not items:
+            return
+        self.tree.selection_set(items)
+        self.tree.focus(items[0])
+        self._on_select()
+        self.status_line(f"Selected {len(items)} app(s). Press Pause or Uninstall.", "info")
 
     def _clear_detail(self):
         self.selected = None

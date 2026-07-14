@@ -8,6 +8,7 @@ Skipped where Tk can't open a display.
 import base64
 import time
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,11 @@ from adb import AdbError
 from scanner import App, score_app
 
 NOW = datetime(2024, 6, 1)
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fx(name):
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 class FakeAdb:
@@ -89,6 +95,10 @@ class FakeAdb:
             return "package:com.facebook.appmanager\n"
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
+        if args == ["dumpsys", "batterystats", "--charged"]:
+            return fx("batterystats.txt")
+        if args == ["pm", "list", "packages", "-U", "-3"]:
+            return fx("packages_uids.txt")
         return ""
 
 
@@ -405,3 +415,10 @@ def test_chrome_popup_quickfix_blocks_notifications(root, monkeypatch, tmp_path)
     assert any("com.android.chrome" in c and
                ("revoke" in c or "POST_NOTIFICATION" in c)
                for c in app.adb.commands)
+
+
+def test_device_tab_shows_top_battery_drainer(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    assert "mAh" in app.dev_vars["top_drainer"].get()

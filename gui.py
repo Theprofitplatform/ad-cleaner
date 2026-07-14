@@ -23,7 +23,7 @@ from actions import (
 from crashes import read_crash_report, summarize
 from device import read_device_stats
 from report import render_history_html, render_receipt_html
-from scanner import ROLE_IDS, build_inventory
+from scanner import ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
 
 # --- palette ---------------------------------------------------------------
@@ -1235,6 +1235,11 @@ class AdCleanerApp:
         if a.sensitive_perms:
             lines.append("")
             lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
+        if STALKER_REASON in a.reasons:
+            lines.append("")
+            lines.append("⚠ This looks like a hidden tracking app. Ask the customer "
+                          "privately whether they expected it — removing it can alert "
+                          "whoever installed it.")
         self.detail_reasons.config(text="\n".join(lines))
         self._enable_btn(self.pause_btn, a.enabled)
         self._enable_btn(self.resume_btn, not a.enabled)

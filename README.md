@@ -76,6 +76,15 @@ individual apps), then restart the phone normally.
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.
 
+### Stalkerware
+
+Ad Cleaner also flags known hidden tracking apps ("stalkerware") that someone
+may have secretly installed to monitor the phone's owner. A match is always
+marked **HIGH risk** with a caution note asking you to check with the phone's
+owner privately before removing it, since doing so can alert whoever installed it.
+
+Stalkerware detection data © Echap (stalkerware-indicators), CC-BY.
+
 ## History / Undo
 
 Every change is recorded on the **History / Undo** tab. Select any entry and

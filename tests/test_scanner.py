@@ -49,6 +49,10 @@ class FakeAdb:
             return fx("launchers.txt")
         if args[:2] == ["dumpsys", "notification"]:
             return fx("dumpsys_notification.txt")
+        if args == ["pm", "list", "packages", "-3", "-U"]:
+            return fx("packages_uids.txt")
+        if args == ["dumpsys", "netstats"]:
+            return fx("netstats.txt")
         # Real device subcommand is `get-role-holders` (NOT `holders`); serving it
         # only under the correct name catches a regression to the broken command.
         if args[:3] == ["cmd", "role", "get-role-holders"]:
@@ -305,6 +309,24 @@ def test_notif_spam_scored():
               first_install=datetime(2020, 1, 1), notif_count=5)
     score_app(app, NOW)
     assert scanner.REASONS["notif_spam"] in app.reasons
+
+
+def test_build_inventory_attaches_data_use():
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    freegift = apps["com.random.freegift"]
+    assert freegift.uid == 10231
+    total = 52428800 + 1048576 + 31457280 + 524288
+    assert freegift.data_mb == total // (1024 * 1024)
+    # a package with no uid match / no netstats entry stays at the zero default.
+    assert apps["com.spotify.music"].uid == 0
+    assert apps["com.spotify.music"].data_mb == 0
+
+
+def test_parse_pkg_uids():
+    assert scanner.parse_pkg_uids(fx("packages_uids.txt")) == {
+        "com.random.freegift": 10231, "com.whatsapp": 10145,
+    }
+    assert scanner.parse_pkg_uids("") == {}
 
 
 def test_stalkerware_forced_high():

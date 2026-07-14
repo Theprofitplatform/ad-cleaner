@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from device import parse_data_use
 from protected import (
     extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
     reset_blocklist,
@@ -117,6 +118,8 @@ class App:
     hijacked_roles: list = field(default_factory=list)   # role names it holds (home/browser/…)
     stopped: bool = False             # transient: force-stopped this session
     notif_count: int = 0              # active notifications at scan time
+    data_mb: int = 0                  # background+foreground data used, MB (dumpsys netstats)
+    uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
@@ -244,6 +247,12 @@ def parse_role_holders(output):
     AOSP prints multiple holders ';'-joined on one line, so split on that too."""
     return [pkg for ln in (output or "").splitlines() if " " not in ln.strip()
             for pkg in ln.strip().split(";") if pkg and "." in pkg]
+
+
+def parse_pkg_uids(output):
+    """`pm list packages -3 -U` -> {package: uid} (raw int, e.g. 10231)."""
+    return {m.group(1): int(m.group(2))
+            for m in re.finditer(r"package:(\S+)\s+uid:(\d+)", output or "")}
 
 
 def parse_notification_counts(output):
@@ -382,6 +391,10 @@ def build_inventory(adb, progress=None, now=None):
             role_owner.setdefault(pkg, []).append(friendly)
     notif = parse_notification_counts(_safe(lambda: adb.shell_text(
         ["dumpsys", "notification", "--noredact"])))
+    pkg_uids = parse_pkg_uids(_safe(lambda: adb.shell_text(
+        ["pm", "list", "packages", "-3", "-U"])))
+    data_use = parse_data_use(_safe(lambda: adb.shell_text(
+        ["dumpsys", "netstats"])))
 
     apps = []
     packages = sorted(installers)
@@ -391,6 +404,7 @@ def build_inventory(adb, progress=None, now=None):
             progress(i, total, pkg)
         dump = _safe(lambda: adb.shell_text(["dumpsys", "package", pkg]))
         perms = parse_perms(dump)
+        uid = pkg_uids.get(pkg, 0)
         app = App(
             package=pkg,
             label=prettify_label(pkg),
@@ -409,6 +423,8 @@ def build_inventory(adb, progress=None, now=None):
             active_accessibility=pkg in a11y_on,
             hijacked_roles=role_owner.get(pkg, []),
             notif_count=notif.get(pkg, 0),
+            uid=uid,
+            data_mb=data_use.get(uid, 0) // (1024 * 1024),
         )
         score_app(app, now)
         apps.append(app)

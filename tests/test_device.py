@@ -75,3 +75,10 @@ def test_parse_power_use_ranks_uids():
     assert top[0] == ("u0a231", 145.0)
     assert ("u0a145", 40.2) in top
     assert device.parse_power_use("") == []
+
+
+def test_parse_data_use_sums_buckets_per_uid():
+    use = device.parse_data_use(fx("netstats.txt"))
+    assert use[10231] == 52428800 + 1048576 + 31457280 + 524288
+    assert use[10145] == 2097152 + 1024
+    assert device.parse_data_use("") == {}

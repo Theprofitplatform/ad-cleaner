@@ -4,10 +4,12 @@ import pytest
 
 import actions
 from actions import (
-    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, can_undo, clean_risky, clear_caches,
-    clear_private_dns, disable_accessibility, fix_role, pause, read_private_dns, reboot,
-    reset_app_data, resume, set_private_dns, stop_all, undo, uninstall, will_clean,
+    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
+    clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role, pause,
+    read_private_dns, reboot, reset_app_data, resume, set_private_dns, stop_all, undo,
+    uninstall, will_clean,
 )
+from adb import AdbError
 from scanner import App, REASONS
 
 
@@ -345,3 +347,24 @@ def test_undo_fix_role_reinstates_previous_holder(log):
     undo(adb, log.recent()[0], log)
     assert ("cmd role add-role-holder --user 0 android.app.role.BROWSER "
             "com.random.freegift") in adb.commands
+
+
+def test_block_notifications_prefers_pm_revoke(log):
+    adb = FakeAdb()
+    assert block_notifications(adb, "com.random.freegift", log)
+    assert any(c.startswith("pm revoke com.random.freegift "
+                            "android.permission.POST_NOTIFICATIONS")
+               for c in adb.commands)
+    entry = log.recent()[0]
+    assert entry["action"] == "block-notifications" and can_undo(entry)
+
+
+def test_block_notifications_falls_back_to_appops(log):
+    class OldAdb(FakeAdb):
+        def shell_text(self, args, timeout=10):
+            if args[:2] == ["pm", "revoke"]:
+                raise AdbError("Unknown permission")   # Android <13
+            return super().shell_text(args, timeout)
+    adb = OldAdb()
+    assert block_notifications(adb, "com.random.freegift", log)
+    assert "appops set com.random.freegift POST_NOTIFICATION ignore" in adb.commands

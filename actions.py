@@ -13,7 +13,7 @@ from adb import AdbError, data_dir
 from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
-UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role"}
+UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications"}
 
 
 class ProtectedAppError(Exception):
@@ -264,6 +264,28 @@ def fix_role(adb, role_id, hijacker_pkg, log):
     return None
 
 
+def block_notifications(adb, package, log):
+    """Silence an app's notifications. Safe + reversible, so no protected-app
+    guard -- this is how fake-virus pop-ups from Chrome site notifications get
+    stopped. Android 13+: revoke POST_NOTIFICATIONS; older: legacy appop.
+    """
+    cmd = ["pm", "revoke", package, "android.permission.POST_NOTIFICATIONS"]
+    try:
+        adb.shell_text(cmd)
+        # let the customer be re-prompted later instead of hard-blocking forever
+        try:
+            adb.shell_text(["pm", "clear-permission-flags", package,
+                            "android.permission.POST_NOTIFICATIONS",
+                            "user-set", "user-fixed"])
+        except AdbError:
+            pass
+    except AdbError:
+        cmd = ["appops", "set", package, "POST_NOTIFICATION", "ignore"]
+        adb.shell_text(cmd)
+    log.append(adb.serial, package, "block-notifications", "allowed", cmd, "ok")
+    return True
+
+
 def backup_apk(adb, app, dest_dir):
     """Pull the app's APK(s) to dest_dir before removal. Returns saved file paths."""
     out = adb.shell_text(["pm", "path", app.package])
@@ -377,6 +399,12 @@ def undo(adb, entry, log):
     elif action == "fix-role":
         role_id = entry["command"].split()[5]
         cmd = ["cmd", "role", "add-role-holder", "--user", "0", role_id, entry["previous"]]
+        adb.shell_text(cmd)
+    elif action == "block-notifications":
+        if "appops" in entry["command"]:
+            cmd = ["appops", "set", pkg, "POST_NOTIFICATION", "allow"]
+        else:
+            cmd = ["pm", "grant", pkg, "android.permission.POST_NOTIFICATIONS"]
         adb.shell_text(cmd)
     else:
         raise AdbError("This action can't be undone.")

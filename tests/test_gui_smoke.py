@@ -373,6 +373,18 @@ def test_fix_roles_button_clears_busy_on_adb_error(root, monkeypatch, tmp_path):
     assert app.busy is False
 
 
+def test_stalkerware_caution_shown_in_detail(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    a = App(package="com.thetruthspy", installer=None, first_install=NOW)
+    score_app(a, NOW)
+    app.apps = [a]; app._render_table()
+    app.tree.selection_set("com.thetruthspy"); app._on_select()
+    pump(root, 0.1)
+    assert "hidden tracking app" in app.detail_reasons["text"]
+
+
 def test_chrome_popup_quickfix_blocks_notifications(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

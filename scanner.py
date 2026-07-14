@@ -12,6 +12,7 @@ from protected import (
     extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
     reset_blocklist,
 )
+from stalkerware import is_stalkerware
 
 # --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
 WEIGHTS = {
@@ -88,6 +89,7 @@ SENSITIVE_PERMS = [
 # Holding any of these counts as sensitive personal-data access.
 _PERSONAL_DATA = ("SEND_SMS", "READ_SMS", "RECEIVE_SMS", "READ_CALL_LOG", "READ_CONTACTS")
 SPOOF_REASON = "Pretends to be a system app"
+STALKER_REASON = "Hidden tracking app (stalkerware)"
 HIGH_THRESHOLD = 55
 MEDIUM_THRESHOLD = 30
 RECENT_DAYS = 30
@@ -316,7 +318,11 @@ def score_app(app, now):
     if blocked:
         app.reasons.insert(0, BLOCKED_REASON)
 
-    if spoof or blocked or app.score >= HIGH_THRESHOLD:
+    stalker = is_stalkerware(app.package)
+    if stalker:
+        app.reasons.insert(0, STALKER_REASON)
+
+    if spoof or blocked or stalker or app.score >= HIGH_THRESHOLD:
         app.risk = "HIGH"
     elif app.score >= MEDIUM_THRESHOLD:
         app.risk = "Medium"

@@ -156,7 +156,10 @@ def is_protected(package, installer=None, is_system=False):
     """
     if is_system:
         return True
-    if package not in PROTECTED_EXACT and (is_blocked(package) or looks_like_junk(package)):
+    from stalkerware import is_stalkerware
+    if package not in PROTECTED_EXACT and (
+            is_blocked(package) or looks_like_junk(package)
+            or is_stalkerware(package)):
         return False
     return is_genuine_system(package, installer, is_system)
 

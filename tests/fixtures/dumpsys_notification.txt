@@ -1,0 +1,6 @@
+  NotificationRecord(0x123 pkg=com.random.freegift user=UserHandle{0} id=1 tag=null
+  NotificationRecord(0x124 pkg=com.random.freegift user=UserHandle{0} id=2 tag=null
+  NotificationRecord(0x125 pkg=com.random.freegift user=UserHandle{0} id=3 tag=null
+  NotificationRecord(0x126 pkg=com.random.freegift user=UserHandle{0} id=4 tag=null
+  NotificationRecord(0x127 pkg=com.random.freegift user=UserHandle{0} id=5 tag=null
+  NotificationRecord(0x128 pkg=com.whatsapp user=UserHandle{0} id=9 tag=msg

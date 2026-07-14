@@ -47,6 +47,8 @@ class FakeAdb:
             return fx(f"dumpsys_{args[2]}.txt")
         if args[:2] == ["cmd", "package"]:  # query-activities (launchers)
             return fx("launchers.txt")
+        if args[:2] == ["dumpsys", "notification"]:
+            return fx("dumpsys_notification.txt")
         # Real device subcommand is `get-role-holders` (NOT `holders`); serving it
         # only under the correct name catches a regression to the broken command.
         if args[:3] == ["cmd", "role", "get-role-holders"]:
@@ -290,3 +292,16 @@ def test_build_inventory_marks_overlay_from_appops():
     apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
     assert apps["com.random.freegift"].overlay
     assert not apps["com.spotify.music"].overlay
+
+
+def test_parse_notification_counts():
+    counts = scanner.parse_notification_counts(fx("dumpsys_notification.txt"))
+    assert counts == {"com.random.freegift": 5, "com.whatsapp": 1}
+    assert scanner.parse_notification_counts("") == {}
+
+
+def test_notif_spam_scored():
+    app = App(package="com.random.freegift", installer=None,
+              first_install=datetime(2020, 1, 1), notif_count=5)
+    score_app(app, NOW)
+    assert scanner.REASONS["notif_spam"] in app.reasons

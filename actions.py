@@ -304,7 +304,9 @@ def block_notifications(adb, package, log):
 
 def restrict_background(adb, package, uid, log):
     """Block the app's background mobile data (same as the per-app 'Background
-    data' toggle -- Wi-Fi unaffected). Safe + reversible, no guard."""
+    data' toggle -- Wi-Fi unaffected). Refuses non-app uids; otherwise safe + reversible."""
+    if uid < 10000:
+        raise ProtectedAppError(f"refusing to restrict uid {uid} (not an app uid)")
     cmd = ["cmd", "netpolicy", "add", "restrict-background-blacklist", str(uid)]
     adb.shell_text(cmd)
     log.append(adb.serial, package, "restrict-data", str(uid), cmd, "ok")

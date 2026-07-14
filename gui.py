@@ -1263,7 +1263,7 @@ class AdCleanerApp:
         self._enable_btn(self.backup_btn, True)
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
         self._enable_btn(self.notif_btn, a.notif_count > 0)
-        self._enable_btn(self.data_btn, True)
+        self._enable_btn(self.data_btn, a.uid >= 10000)
 
     # --- actions ------------------------------------------------------------
 
@@ -1404,7 +1404,7 @@ class AdCleanerApp:
             try:
                 restrict_background(self.adb, a.package, a.uid, self.log)
                 self._post(self._restrict_data_done, label, None)
-            except AdbError as e:
+            except (AdbError, ProtectedAppError) as e:
                 self._post(self._restrict_data_done, label, str(e))
 
         self.busy = True

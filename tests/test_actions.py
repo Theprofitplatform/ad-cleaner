@@ -378,3 +378,10 @@ def test_restrict_background_uses_netpolicy_and_undoes(log):
     assert can_undo(entry)
     undo(adb, entry, log)
     assert "cmd netpolicy remove restrict-background-blacklist 10231" in adb.commands
+
+
+def test_restrict_background_refuses_non_app_uid(log):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        restrict_background(adb, "com.x", 0, log)
+    assert not any("netpolicy" in c for c in adb.commands)

@@ -317,6 +317,23 @@ def test_restrict_data_from_detail(root, monkeypatch, tmp_path):
     assert "cmd netpolicy add restrict-background-blacklist 10231" in app.adb.commands
 
 
+def test_data_btn_disabled_for_non_app_uid(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    bad = App(package="com.unknown.pkg", installer=None, risk="HIGH", uid=0)
+    app.apps = [bad]; app._render_table()
+    app.tree.selection_set("com.unknown.pkg"); app._on_select()
+    pump(root, 0.1)
+    assert str(app.data_btn["state"]) == "disabled"
+
+    good = App(package="com.random.freegift", installer=None, risk="HIGH", uid=10231)
+    app.apps = [good]; app._render_table()
+    app.tree.selection_set("com.random.freegift"); app._on_select()
+    pump(root, 0.1)
+    assert str(app.data_btn["state"]) != "disabled"
+
+
 def test_screenshot_and_reboot(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

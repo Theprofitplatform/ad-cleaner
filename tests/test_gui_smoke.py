@@ -156,6 +156,8 @@ def _wire(gui_mod, monkeypatch, tmp_path, adb_cls=FakeAdb):
     monkeypatch.setattr(gui_mod.playstore, "lookup", lambda pkg, **k: None)
     monkeypatch.setattr(gui_mod.playstore, "fetch_icon", lambda url, **k: None)
     monkeypatch.setattr(gui_mod.appicon, "device_icon", lambda adb, pkg: None)
+    # no real Windows PnP queries during tests
+    monkeypatch.setattr(gui_mod.usbinfo, "detect_phones", lambda ttl=10: [])
 
 
 def test_opens_and_shows_wizard_without_phone(root, monkeypatch, tmp_path):
@@ -166,6 +168,20 @@ def test_opens_and_shows_wizard_without_phone(root, monkeypatch, tmp_path):
     assert app.wizard.winfo_manager()           # wizard is visible
     assert str(app.clean_btn["state"]) == "disabled"
     assert app.alive
+
+
+def test_usb_detected_phone_shows_in_wizard(root, monkeypatch, tmp_path):
+    """Phone plugged in but ADB-invisible (USB debugging off) -> wizard greets
+    it by name + serial from the USB descriptors and pre-picks the brand."""
+    _wire(gui, monkeypatch, tmp_path, adb_cls=NoDeviceAdb)
+    monkeypatch.setattr(gui.usbinfo, "detect_phones", lambda ttl=10: [
+        {"name": "Abhishek's S26 Ultra",
+         "brand": "SAMSUNG Electronics Co., Ltd. ", "serial": "R5GL24XWASL"}])
+    app = gui.AdCleanerApp(root)
+    pump(root, 0.6)
+    assert "S26 Ultra" in app.wiz_status.get()
+    assert "R5GL24XWASL" in app.wiz_status.get()
+    assert app.brand_var.get() == "Samsung"     # auto-picked from manufacturer
 
 
 def test_connect_scan_and_protection(root, monkeypatch, tmp_path):

@@ -30,6 +30,7 @@ from setup_helper import download_platform_tools
 
 import appicon
 import playstore
+import usbinfo
 
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
@@ -928,6 +929,29 @@ class AdCleanerApp:
             self.wiz_status.set("Looking for your phone…  plug it in with a USB cable.")
             self._mark_steps(current=0, done=0)
 
+    def _show_usb_phone(self, phone):
+        """Phone visible on USB but invisible to ADB -> USB debugging is off.
+        Greet it by name (from the Windows USB descriptors) so the shop can
+        log brand/serial at intake, and point the wizard at step 1."""
+        name = phone["name"] or "A phone"
+        sn = f"  ·  serial {phone['serial']}" if phone["serial"] else ""
+        self._disconnect(f"{name} plugged in — turn on USB debugging", "orange")
+        self._set_wizard_state("searching")
+        self.wiz_status_lbl.config(style="PanelAmber.TLabel")
+        self.wiz_status.set(
+            f"We can see “{name}”{sn} — now turn on “USB debugging” (step 1).")
+        if phone == getattr(self, "_usb_phone", None):
+            return          # same phone as last poll: don't fight a manual brand pick
+        self._usb_phone = phone
+        brand = (phone["brand"] or "").lower()
+        for key in BRAND_STEPS:
+            words = [w for w in key.lower().replace("/", " ").split()
+                     if w not in ("other", "not", "sure")]
+            if any(w in brand for w in words):
+                self.brand_var.set(key)
+                self._show_brand()
+                break
+
     def _draw_dot(self, color):
         self.dot.delete("all")
         self.dot.create_oval(3, 3, 16, 16, fill=DOT[color], outline="")
@@ -1000,17 +1024,24 @@ class AdCleanerApp:
         except AdbError as e:
             self._post(self._on_devices, [], str(e))
             return
-        self._post(self._on_devices, devices, None)
+        # ADB sees nothing — maybe the phone is plugged in with USB debugging
+        # off. Windows still knows its name/brand/serial from the USB
+        # descriptors (usbinfo caches, so this is cheap on the 2 s poll).
+        usb = usbinfo.detect_phones() if not devices else []
+        self._post(self._on_devices, devices, None, usb)
 
-    def _on_devices(self, devices, err):
+    def _on_devices(self, devices, err, usb=()):
         if not self.alive:
             return
         ready = [d for d in devices if d["state"] == "device"]
         unauth = [d for d in devices if d["state"] == "unauthorized"]
 
         if not devices:
-            self._disconnect("No phone connected", "grey")
-            self._set_wizard_state("searching")
+            if usb:
+                self._show_usb_phone(usb[0])
+            else:
+                self._disconnect("No phone connected", "grey")
+                self._set_wizard_state("searching")
         elif unauth and not ready:
             self._disconnect("Tap “Allow” on the phone", "orange")
             self._set_wizard_state("unauthorized")

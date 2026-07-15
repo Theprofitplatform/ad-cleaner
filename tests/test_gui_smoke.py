@@ -463,7 +463,10 @@ def test_play_check_updates_table_and_detail(root, monkeypatch, tmp_path):
     adware = next(a for a in app.apps if a.package == "com.random.adware")
     app._apply_play(adware, {"listed": False, "name": None, "icon": None})
     app._apply_play(adware, {"listed": False, "name": None, "icon": None})
-    assert adware.reasons.count(gui.playstore.NOT_LISTED_REASON) == 1
+    # The Play verdict must NOT be appended to reasons -- that list feeds
+    # will_clean's unattended nuisance fence, and reasons is read by the
+    # clean worker thread while _apply_play runs on the UI thread.
+    assert gui.playstore.NOT_LISTED_REASON not in adware.reasons
     app.tree.selection_set("com.random.adware"); app._on_select()
     pump(root, 0.2)
     assert gui.playstore.NOT_LISTED_REASON in app.detail_reasons["text"]
@@ -504,6 +507,17 @@ def test_battery_health_zero_shows_no_data(root, monkeypatch, tmp_path):
     pump(root, 1.5)
     app._show_battery_report({"top_drainers": [], "health_pct": 0})
     assert app.dev_vars["battery_health"].get() == "—"
+
+
+def test_disconnect_clears_stale_battery_report(root, monkeypatch, tmp_path):
+    """A stale battery_report from phone A must not survive into phone B's
+    session -- otherwise phone B's receipt can print phone A's battery health."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.battery_report = {"top_drainers": [], "health_pct": 77}
+    app._disconnect("No phone connected", "grey")
+    assert app.battery_report is None
 
 
 def test_receipt_most_used_strips_package_suffix_from_label(root, monkeypatch, tmp_path):

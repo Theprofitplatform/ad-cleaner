@@ -320,6 +320,8 @@ def test_build_inventory_attaches_data_use():
     total = 52428800 + 1048576 + 31457280 + 524288
     assert freegift.data_mb == total // (1024 * 1024)
     # a package with no uid match / no netstats entry stays at the zero default.
+    # uid=0 is "unresolved", not root -- root's own netstats bucket (uid=0 in
+    # the fixture) must never be attributed to every app whose uid lookup failed.
     assert apps["com.spotify.music"].uid == 0
     assert apps["com.spotify.music"].data_mb == 0
 

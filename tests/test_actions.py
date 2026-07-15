@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import actions
+import playstore
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role, pause,
@@ -10,7 +11,7 @@ from actions import (
     stop_all, undo, uninstall, will_clean,
 )
 from adb import AdbError
-from scanner import App, REASONS
+from scanner import App, REASONS, STALKER_REASON
 
 
 class FakeAdb:
@@ -204,6 +205,37 @@ def test_clean_risky_skips_nuisance_name_only_medium(log):
     assert res["acted"] == 1
     assert "com.junk.cleaner" in adb.disabled
     assert "com.phone.cleaner" not in adb.disabled
+
+
+def test_will_clean_ignores_play_not_listed_reason_in_nuisance_fence():
+    # The Play-lookup feature appends NOT_LISTED_REASON to a.reasons for
+    # display. That must not defeat the nuisance-only fence (Fix 1).
+    name_only = App(package="com.phone.cleaner", installer="com.android.vending",
+                    risk="Medium", reasons=[REASONS["nuisance"]])
+    assert not will_clean(name_only)
+
+    name_only_not_listed = App(package="com.phone.cleaner2", installer="com.android.vending",
+                               risk="Medium",
+                               reasons=[REASONS["nuisance"], playstore.NOT_LISTED_REASON])
+    assert not will_clean(name_only_not_listed)  # still fenced
+
+    corroborated = App(package="com.junk.cleaner", installer="com.android.vending",
+                       overlay=True, risk="Medium",
+                       reasons=[REASONS["nuisance"], REASONS["overlay"]])
+    assert will_clean(corroborated)  # real signal present -> not fenced
+
+
+def test_will_clean_excludes_stalkerware(log):
+    # Victim safety: auto-pausing hidden tracking apps can alert the abuser
+    # who installed them, so shop mode / one-click clean must never touch
+    # them unattended (Fix 2).
+    adb = FakeAdb()
+    stalker = App(package="com.hidden.tracker", installer=None, risk="HIGH",
+                  reasons=[STALKER_REASON])
+    assert not will_clean(stalker)
+    res = clean_risky(adb, [stalker], log)
+    assert res["acted"] == 0
+    assert "com.hidden.tracker" not in adb.disabled
 
 
 def test_clean_risky_remove_uninstalls_suspicious(log):

@@ -428,7 +428,10 @@ def build_inventory(adb, progress=None, now=None):
             hijacked_roles=role_owner.get(pkg, []),
             notif_count=notif.get(pkg, 0),
             uid=uid,
-            data_mb=data_use.get(uid, 0) // (1024 * 1024),
+            # uid 0 means "unresolved" here (the -U lookup failed for this
+            # package), not root -- attributing root's netstats bucket to
+            # every unresolved app would inflate all of their data_mb.
+            data_mb=(data_use.get(uid, 0) // (1024 * 1024)) if uid else 0,
             used_min=usage.get(pkg, 0),
         )
         score_app(app, now)

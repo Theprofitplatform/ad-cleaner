@@ -22,7 +22,9 @@ def parse_df(text):
     """`df /data` -> (total_bytes, used_bytes, free_bytes). 0s if unparsable."""
     for line in text.splitlines():
         f = line.split()
-        if len(f) >= 6 and f[-1] == "/data" and f[-5].isdigit():
+        # Android 16 / One UI reports the mount point as /data/user/0
+        if (len(f) >= 6 and f[-5].isdigit()
+                and (f[-1] == "/data" or f[-1].startswith("/data/"))):
             total, used, avail = (int(f[-5]) * 1024, int(f[-4]) * 1024,
                                   int(f[-3]) * 1024)
             return total, used, avail

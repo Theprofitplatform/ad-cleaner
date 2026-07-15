@@ -26,6 +26,16 @@ def test_parse_df():
     assert free == 62914560 * 1024
 
 
+def test_parse_df_android16_per_user_mount_point():
+    # Samsung S25 / Android 16: df /data reports the mount as /data/user/0
+    text = ("Filesystem       1K-blocks      Used Available Use% Mounted on\n"
+            "/dev/block/dm-73 230744064 146459784  83977080  64% /data/user/0\n")
+    total, used, free = parse_df(text)
+    assert total == 230744064 * 1024
+    assert used == 146459784 * 1024
+    assert free == 83977080 * 1024
+
+
 def test_parse_df_unparsable_returns_zeros():
     assert parse_df("garbage output") == (0, 0, 0)
 

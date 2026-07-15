@@ -25,7 +25,7 @@ from bloatware import find_bloat
 from crashes import read_crash_report, summarize
 from device import GB, read_battery_report, read_device_stats, read_resource_report
 from report import render_history_html, render_receipt_html
-from scanner import ROLE_IDS, STALKER_REASON, build_inventory
+from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
 
 import appicon
@@ -1866,29 +1866,34 @@ class AdCleanerApp:
         row = ttk.Frame(win)
         row.pack(fill="both", expand=True, padx=10, pady=(0, 4))
         panels = [
-            ("🔥  Working hardest (CPU)", [(p, f"{v:g}%") for p, v in report["cpu"]]),
-            ("🧠  In memory now (RAM)", [(p, size(v)) for p, v in report["ram"]]),
-            ("💾  Taking up space", [(p, f"{size(t)}  ({size(d)} data)")
-                                     for p, t, d, c in report["storage"]]),
+            ("🔥  Working hardest (CPU)", "CPU",
+             [(p, f"{v:g}%") for p, v in report["cpu"]],
+             "— nothing is working hard right now"),
+            ("🧠  In memory now (RAM)", "RAM",
+             [(p, size(v)) for p, v in report["ram"]], "— couldn't read"),
+            ("💾  Taking up space", "Size",
+             [(p, f"{size(t)}  ({size(d)} data)")
+              for p, t, d, c in report["storage"]], "— couldn't read"),
         ]
         self.res_trees = []
-        for col, (title, rows) in enumerate(panels):
+        for col, (title, unit, rows, empty) in enumerate(panels):
             box = ttk.Frame(row)
             box.grid(row=0, column=col, sticky="nsew", padx=6)
             row.columnconfigure(col, weight=1)
             ttk.Label(box, text=title, font=(FONT, 11, "bold")).pack(anchor="w")
             t = ttk.Treeview(box, columns=("app", "use"), show="headings", height=10)
             t.heading("app", text="App")
-            t.heading("use", text="Uses")
+            t.heading("use", text=unit)
             t.column("app", width=240, anchor="w")
             t.column("use", width=120, anchor="e")
             for r in RISK_BG:
                 t.tag_configure(r, background=RISK_BG[r], foreground=RISK_FG[r])
             for pkg, val in rows:
-                t.insert("", "end", values=(label.get(pkg, pkg), val),
+                t.insert("", "end",
+                         values=(label.get(pkg) or KNOWN_LABELS.get(pkg, pkg), val),
                          tags=(risk.get(pkg, ""),))
             if not rows:
-                t.insert("", "end", values=("— couldn't read", ""))
+                t.insert("", "end", values=(empty, ""))
             t.pack(fill="both", expand=True, pady=(4, 0))
             self.res_trees.append(t)
         row.rowconfigure(0, weight=1)

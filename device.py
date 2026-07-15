@@ -110,10 +110,13 @@ def parse_cpu_by_app(text):
     for m in re.finditer(r"^\s*([\d.]+)%\s+\d+/([^\s:]+)(?::\S+)?:",
                          text or "", re.MULTILINE):
         name = m.group(2)
-        if "." not in name:
+        # kernel threads (irq/..., kworker/...) carry dots in their names too
+        if "." not in name or "/" in name:
             continue
         use[name] = use.get(name, 0.0) + float(m.group(1))
-    return sorted(use.items(), key=lambda r: -r[1])
+    # 0% rows say nothing in a "working hardest" list
+    return sorted(((n, v) for n, v in use.items() if v > 0),
+                  key=lambda r: -r[1])
 
 
 def parse_pss_by_app(text):

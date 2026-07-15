@@ -191,6 +191,12 @@ def test_prettify_label():
     assert prettify_label("com.foo.flashlight") == "Flashlight (com.foo.flashlight)"
 
 
+def test_prettify_label_uses_known_names():
+    # the last-segment guess would say "Katana" — customers know it as Facebook
+    assert prettify_label("com.facebook.katana") == "Facebook (com.facebook.katana)"
+    assert prettify_label("com.zhiliaoapp.musically") == "TikTok (com.zhiliaoapp.musically)"
+
+
 @pytest.mark.parametrize("pkg", ["com.a.xkwptqzr", "com.a.a8f3k2j9x"])
 def test_looks_random_true(pkg):
     assert looks_random(pkg)

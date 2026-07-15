@@ -111,6 +111,12 @@ def test_parse_cpu_by_app_merges_and_filters():
     merged = device.parse_cpu_by_app(
         "  1.0% 1/com.a.b: 1% user\n  0.5% 2/com.a.b:remote: 0.5% user\n")
     assert merged == [("com.a.b", 1.5)]
+    # kernel threads carry dots in their names; 0% rows say nothing
+    noisy = device.parse_cpu_by_app(
+        "  0.1% 242/irq/242-310b3400.qcom,bwmon-llcc-gold: 0.1% kernel\n"
+        "  0% 9/com.idle.app: 0% user\n"
+        "  0.2% 3/com.busy.app: 0.2% user\n")
+    assert noisy == [("com.busy.app", 0.2)]
 
 
 def test_parse_pss_by_app_reads_fixture():

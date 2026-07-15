@@ -143,8 +143,44 @@ class App:
         return "Stopped" if self.stopped else "Running"
 
 
+# Names a customer actually knows, for packages whose id guesses wrong
+# ("Katana" is Facebook) plus the system processes that top the hog lists.
+# ponytail: curated dict, not manifest parsing — extend as odd ones show up.
+KNOWN_LABELS = {
+    "com.facebook.katana": "Facebook",
+    "com.facebook.orca": "Messenger",
+    "com.facebook.lite": "Facebook Lite",
+    "com.instagram.android": "Instagram",
+    "com.zhiliaoapp.musically": "TikTok",
+    "com.ss.android.ugc.trill": "TikTok",
+    "com.whatsapp": "WhatsApp",
+    "com.snapchat.android": "Snapchat",
+    "com.twitter.android": "X (Twitter)",
+    "com.aliexpresshd": "AliExpress",
+    "com.sec.android.app.shealth": "Samsung Health",
+    "com.sec.android.app.sbrowser": "Samsung Internet",
+    "com.sec.android.app.music": "Samsung Music",
+    "com.sec.android.app.launcher": "Samsung home screen",
+    "com.sec.android.sdhms": "Samsung device care",
+    "com.samsung.android.wallpaper.live": "Samsung live wallpaper",
+    "com.samsung.android.smartsuggestions": "Samsung smart suggestions",
+    "com.samsung.android.offline.languagemodel": "Samsung AI language model",
+    "com.android.systemui": "Android interface (System UI)",
+    "com.android.chrome": "Chrome",
+    "com.android.vending": "Google Play Store",
+    "com.google.android.gms": "Google Play services",
+    "com.google.android.googlequicksearchbox": "Google Search",
+    "com.google.android.youtube": "YouTube",
+    "com.google.android.apps.photos": "Google Photos",
+    "com.google.android.aicore": "Android AI Core",
+}
+
+
 def prettify_label(package):
     """`com.foo.flashlight` -> `Flashlight (com.foo.flashlight)`."""
+    known = KNOWN_LABELS.get(package)
+    if known:
+        return f"{known} ({package})"
     seg = package.split(".")[-1] or package
     return f"{seg[:1].upper()}{seg[1:]} ({package})"
 

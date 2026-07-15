@@ -1,0 +1,33 @@
+junk header line
+
+Total PSS by process:
+    511,809K: com.android.systemui (pid 4575)
+    490,046K: com.facebook.katana (pid 12350 / activities)
+    480,037K: com.zhiliaoapp.musically (pid 11351 / activities)
+    412,643K: system (pid 2975)
+    323,306K: com.samsung.android.wallpaper.live (pid 4375)
+    228,437K: com.sec.android.app.launcher (pid 5199 / activities)
+    212,157K: surfaceflinger (pid 2036)
+    206,010K: com.lemon.lvoverseas (pid 13685)
+    187,892K: com.google.android.gms (pid 5980)
+    187,664K: com.tplink.iot (pid 16504 / activities)
+    180,767K: com.google.android.gms.persistent (pid 4962)
+    162,989K: vendor.samsung.hardware.camera.provider-service_64 (pid 1965)
+    160,054K: com.google.android.apps.messaging (pid 1682 / activities)
+    153,766K: com.ebay.gumtree.au (pid 9972)
+    132,550K: com.instagram.android (pid 22421)
+    129,821K: com.sec.android.app.shealth:remote (pid 11670)
+    127,400K: com.samsung.android.biometrics.app.setting (pid 13122)
+    118,959K: com.google.android.inputmethod.latin (pid 7104)
+    117,445K: com.facebook.orca (pid 2667)
+    115,330K: com.alibaba.aliexpresshd (pid 23246)
+    111,897K: com.discord (pid 8223)
+    102,268K: ai.perplexity.app.android (pid 8592)
+     94,941K: com.samsung.android.smartsuggestions (pid 7218)
+     94,450K: com.facebook.adsmanager (pid 21365 / activities)
+     84,545K: com.samsung.android.heartplugin:persistent (pid 8553)
+     83,573K: com.samsung.android.smartsuggestions:moneta (pid 8411)
+     76,940K: com.google.android.youtube (pid 11965)
+    (trimmed)
+
+Total PSS by category:

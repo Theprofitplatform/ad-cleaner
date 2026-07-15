@@ -95,6 +95,12 @@ class FakeAdb:
             return "package:com.facebook.appmanager\n"
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
+        if args == ["dumpsys", "cpuinfo"]:
+            return fx("cpuinfo.txt")
+        if args == ["dumpsys", "meminfo"]:
+            return fx("meminfo_pss.txt")
+        if args == ["dumpsys", "diskstats"]:
+            return fx("diskstats.txt")
         if args == ["dumpsys", "batterystats", "--charged"]:
             return fx("batterystats.txt")
         if args == ["pm", "list", "packages", "-U", "-3"]:
@@ -522,3 +528,45 @@ def test_receipt_most_used_strips_package_suffix_from_label(root, monkeypatch, t
     # Should contain "Flashlight (62 min)", NOT "Flashlight (com.foo.flashlight) (62 min)"
     assert "Flashlight (62 min)" in text, f"expected 'Flashlight (62 min)' in receipt, got:\n{text}"
     assert "flashlight) (62 min)" not in text, f"should not have doubled parens, got:\n{text}"
+
+
+def test_resource_hogs_window(root, monkeypatch, tmp_path):
+    """'What's using this phone?' opens with three populated hog lists and
+    keeps the scan's risk colour on flagged apps."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    assert str(app.res_btn["state"]) == "normal"
+
+    # make a scanned risky app appear in the CPU list so cross-highlighting fires
+    risky = next(a for a in app.apps if a.package == "com.random.adware")
+    monkeypatch.setattr(gui, "read_resource_report", lambda adb, top=10: {
+        "cpu": [("com.random.adware", 4.2), ("com.facebook.katana", 0.7)],
+        "ram": [("com.facebook.katana", 500 * 1024 * 1024)],
+        "storage": [("com.facebook.katana", 3 * gui.GB, 2 * gui.GB, 100)],
+        "disk_free": 80 * gui.GB, "disk_total": 220 * gui.GB})
+    app.on_resources()
+    pump(root, 1.0)
+
+    assert app.res_win.winfo_exists()
+    cpu_tree, ram_tree, disk_tree = app.res_trees
+    first = cpu_tree.item(cpu_tree.get_children()[0])
+    assert "4.2%" in first["values"][1]
+    assert risky.risk in first["tags"]                      # risk colour carried over
+    assert ram_tree.get_children() and disk_tree.get_children()
+    assert str(app.res_btn["state"]) == "normal"            # re-enabled after fetch
+    app.res_win.destroy()
+
+
+def test_resource_hogs_error_reenables_button(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+
+    def boom(adb, top=10):
+        raise AdbError("device gone")
+    monkeypatch.setattr(gui, "read_resource_report", boom)
+    app.on_resources()
+    pump(root, 1.0)
+    assert str(app.res_btn["state"]) == "normal"
+    assert not hasattr(app, "res_win") or not app.res_win.winfo_exists()

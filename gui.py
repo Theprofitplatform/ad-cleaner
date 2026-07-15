@@ -23,7 +23,7 @@ from actions import (
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
-from device import read_battery_report, read_device_stats
+from device import GB, read_battery_report, read_device_stats, read_resource_report
 from report import render_history_html, render_receipt_html
 from scanner import ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
@@ -556,8 +556,12 @@ class AdCleanerApp:
         self.bloat_btn = self._flat_button(btns, "💤  Disable preinstalled junk",
                                            self.on_debloat, AMBER, AMBER_HOT)
         self.bloat_btn.pack(side="left", padx=(8, 0))
+        self.res_btn = self._flat_button(btns, "📊  What's using this phone?",
+                                         self.on_resources, SLATE, SLATE_HOT)
+        self.res_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
-                         self.reboot_btn, self.popups_btn, self.bloat_btn)
+                         self.reboot_btn, self.popups_btn, self.bloat_btn,
+                         self.res_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1820,6 +1824,73 @@ class AdCleanerApp:
         top = report["top_drainers"]
         self.dev_vars["top_drainer"].set(
             f"{top[0][0]} ({top[0][1]:g} mAh since last charge)" if top else "—")
+
+    def on_resources(self):
+        if not self.serial:
+            return
+        self._enable_btn(self.res_btn, False)
+
+        def work():
+            try:
+                report = read_resource_report(self.adb)
+                self._post(self._show_resources, report, None)
+            except Exception as e:
+                self._post(self._show_resources, None, str(e))
+        self._run_bg(work)
+
+    def _show_resources(self, report, err):
+        """Three ranked hog lists (CPU / RAM / storage); rows the scan flagged
+        risky keep their risk colour — slow phone + risky app = the answer."""
+        self._enable_btn(self.res_btn, True)
+        if not report:
+            self.status_line("Couldn't read usage. " + self._friendly(err or ""), "error")
+            return
+
+        def size(n):
+            return f"{n / GB:.1f} GB" if n >= GB else f"{n // (1024 * 1024)} MB"
+
+        risk = {a.package: a.risk for a in self.apps if a.risk in SUSPICIOUS}
+        label = {a.package: a.label.split(" (")[0] for a in self.apps}
+        win = tk.Toplevel(self.root)
+        win.title("What's using this phone")
+        win.configure(bg=BASE)
+        head = (f"Storage: {size(report['disk_free'])} free of "
+                f"{size(report['disk_total'])}" if report["disk_total"] else "")
+        tk.Label(win, text=head, font=(FONT, 12, "bold"), bg=BASE, fg=INK,
+                 padx=12, pady=8).pack(anchor="w")
+        row = ttk.Frame(win)
+        row.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+        panels = [
+            ("🔥  Working hardest (CPU)", [(p, f"{v:g}%") for p, v in report["cpu"]]),
+            ("🧠  In memory now (RAM)", [(p, size(v)) for p, v in report["ram"]]),
+            ("💾  Taking up space", [(p, f"{size(t)}  ({size(d)} data)")
+                                     for p, t, d, c in report["storage"]]),
+        ]
+        self.res_trees = []
+        for col, (title, rows) in enumerate(panels):
+            box = ttk.Frame(row)
+            box.grid(row=0, column=col, sticky="nsew", padx=6)
+            row.columnconfigure(col, weight=1)
+            ttk.Label(box, text=title, font=(FONT, 11, "bold")).pack(anchor="w")
+            t = ttk.Treeview(box, columns=("app", "use"), show="headings", height=10)
+            t.heading("app", text="App")
+            t.heading("use", text="Uses")
+            t.column("app", width=240, anchor="w")
+            t.column("use", width=120, anchor="e")
+            for r in RISK_BG:
+                t.tag_configure(r, background=RISK_BG[r], foreground=RISK_FG[r])
+            for pkg, val in rows:
+                t.insert("", "end", values=(label.get(pkg, pkg), val),
+                         tags=(risk.get(pkg, ""),))
+            if not rows:
+                t.insert("", "end", values=("— couldn't read", ""))
+            t.pack(fill="both", expand=True, pady=(4, 0))
+            self.res_trees.append(t)
+        row.rowconfigure(0, weight=1)
+        tk.Label(win, text="Coloured rows were flagged risky by the scan. "
+                           "CPU is averaged over the last few minutes.",
+                 bg=BASE, fg=MUTED, padx=12, pady=8).pack(anchor="w")
+        self.res_win = win
 
     def on_clear_caches(self):
         if self.busy or not self.serial:

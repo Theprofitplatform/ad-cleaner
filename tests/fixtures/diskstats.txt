@@ -1,0 +1,20 @@
+Latency: 1ms [512B Data Write]
+Recent Disk Write Speed (kB/s) = 58079
+Data-Free: 86155812K / 230744064K total = 37% free
+Cache-Free: 86155812K / 230744064K total = 37% free
+System-Free: 0K / 8567332K total = 0% free
+Metadata-Free: 19132K / 63488K total = 30% free
+File-based Encryption: true
+App Size: 65900385280
+App Data Size: 55770203878
+App Cache Size: 16410031616
+Photos Size: 5956120576
+Videos Size: 12116799488
+Audio Size: 1360617472
+Downloads Size: 0
+System Size: 38595985408
+Other Size: 14553763840
+Package Names: ["com.samsung.SMT.lang_de_de_f00", "com.google.android.networkstack.tethering", "com.amazon.mShop.android.shopping", "com.samsung.android.provider.filterprovider", "com.asana.app", "com.bss.mobilemall", "com.samsung.android.mydevice", "com.google.android.apps.subscriptions.red", "com.android.cts.priv.ctsshim", "com.samsung.android.smartswitchassistant", "com.sec.vsim.ericssonnsds.webapp", "com.sec.android.app.setupwizardlegalprovider"]
+App Sizes: [0, 65024, 217011712, 41782784, 63407616, 60610048, 10741248, 33687040, 0, 41782784, 0, 0]
+App Data Sizes: [0, 29184, 118075392, 501760, 0, 7725056, 16384, 2195456, 0, 44032, 0, 7589888]
+Cache Sizes: [0, 14336, 33271808, 46080, 0, 6774784, 0, 90112, 0, 29696, 0, 16384]

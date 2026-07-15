@@ -2147,7 +2147,10 @@ class AdCleanerApp:
     FRIENDLY_ACTION = {
         "pause": "Paused", "resume": "Resumed", "uninstall": "Uninstalled",
         "force-stop": "Closed", "block-popup": "Blocked pop-ups",
-        "clear-cache": "Cleared caches",
+        "clear-cache": "Cleared caches", "fix-role": "Restored defaults",
+        "block-notifications": "Stopped notifications",
+        "debloat": "Disabled preinstalled app",
+        "restrict-data": "Blocked background data",
     }
 
     def _refresh_history(self):

@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import playstore
+import scanner
 from adb import AdbError, data_dir
 from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
@@ -186,12 +188,28 @@ _NUISANCE_ONLY = [REASONS["nuisance"]]
 def will_clean(app):
     """True if one-click clean (big green button / Shop mode) may auto-act on
     this app: suspicious and not protected -- EXCEPT a Medium whose only
-    evidence is a junk-looking name. That stays flagged in the Apps tab for a
-    human to bulk-pause/uninstall deliberately, but is never cleaned unattended.
+    *scored* evidence is a junk-looking name. That stays flagged in the Apps
+    tab for a human to bulk-pause/uninstall deliberately, but is never cleaned
+    unattended. The Play-lookup reason (not-listed) is display-only and must
+    not defeat the fence, so the check is membership-based rather than an
+    exact-list comparison: a Medium fences whenever its reasons are a subset
+    of {nuisance, not-listed} and the nuisance reason is present.
     """
     if app.risk not in SUSPICIOUS or app.protected:
         return False
-    return not (app.risk == "Medium" and app.reasons == _NUISANCE_ONLY)
+    nuisance_fenced = (
+        app.risk == "Medium"
+        and _NUISANCE_ONLY[0] in app.reasons
+        and not (set(app.reasons) - {_NUISANCE_ONLY[0], playstore.NOT_LISTED_REASON})
+    )
+    if nuisance_fenced:
+        return False
+    # Victim safety: auto-pausing a hidden tracking app can alert the abuser
+    # who installed it. The detail pane tells the tech to talk to the
+    # customer privately first, so stalkerware is never cleaned unattended.
+    if scanner.STALKER_REASON in app.reasons:
+        return False
+    return True
 
 
 def clean_risky(adb, apps, log, progress=None, remove=False):

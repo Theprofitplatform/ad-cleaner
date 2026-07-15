@@ -1092,6 +1092,7 @@ class AdCleanerApp:
         self._enable_btn(self.crash_btn, False)
         for v in self.dev_vars.values():
             v.set("—")
+        self.battery_report = None  # don't let phone A's health survive into phone B's session
         if was:
             self.status_line("Phone disconnected.")
             self.apps = []
@@ -1266,6 +1267,8 @@ class AdCleanerApp:
         if a.play and a.play.get("listed") and a.play.get("name"):
             lines.append(f"✔ On Google Play as “{a.play['name']}” — compare that name "
                          "and icon with what the phone shows.")
+        elif a.play and not a.play.get("listed"):
+            lines.append("• " + playstore.NOT_LISTED_REASON)
         if a.sensitive_perms:
             lines.append("")
             lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
@@ -1295,7 +1298,8 @@ class AdCleanerApp:
     def _start_play_checks(self, apps):
         """Ask Google Play about every scanned package, in the background.
         Disk-cached, so repeat phones are instant; offline just means unknown.
-        Display-only: never touches score or the shop-mode clean decision.
+        Display-only: never touches score or reasons, so it can't defeat
+        will_clean's unattended nuisance-only fence.
         ponytail: one sequential worker thread; pool it if the trickle annoys."""
         def work():
             for a in apps:
@@ -1307,10 +1311,11 @@ class AdCleanerApp:
     def _apply_play(self, a, info):
         if a not in self.apps:          # a rescan replaced the list meanwhile
             return
+        # Store the verdict on a.play only -- NOT a.reasons. reasons feeds
+        # will_clean's unattended nuisance fence (an exact-list check there),
+        # and it's read by the clean worker thread while this runs on the UI
+        # thread, so mutating it here would be an unguarded cross-thread write.
         a.play = info
-        if (not info.get("listed") and not a.protected
-                and playstore.NOT_LISTED_REASON not in a.reasons):
-            a.reasons.append(playstore.NOT_LISTED_REASON)
         if self.tree.exists(a.package):
             self.tree.item(a.package, values=self._row_values(a))
         if self.selected is a:
@@ -2213,7 +2218,10 @@ class AdCleanerApp:
     FRIENDLY_ACTION = {
         "pause": "Paused", "resume": "Resumed", "uninstall": "Uninstalled",
         "force-stop": "Closed", "block-popup": "Blocked pop-ups",
-        "clear-cache": "Cleared caches",
+        "clear-cache": "Cleared caches", "fix-role": "Restored defaults",
+        "block-notifications": "Stopped notifications",
+        "debloat": "Disabled preinstalled app",
+        "restrict-data": "Blocked background data",
     }
 
     def _refresh_history(self):

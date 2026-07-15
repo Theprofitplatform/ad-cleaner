@@ -355,6 +355,18 @@ def test_clean_risky_reports_popups_blocked(log):
     assert res["popups_blocked"] == 1     # only the overlay app is denied
 
 
+def test_clean_risky_popups_counts_only_confirmed_denies(log):
+    class DenyFails(FakeAdb):
+        def shell_text(self, args, timeout=10):
+            if args[:2] == ["appops", "set"] and "SYSTEM_ALERT_WINDOW" in args:
+                raise AdbError("appops failed")
+            return super().shell_text(args, timeout)
+
+    adware = App(package="com.random.adware", installer=None, overlay=True, risk="HIGH")
+    res = clean_risky(DenyFails(), [adware], log)
+    assert res["popups_blocked"] == 0     # attempted but not confirmed -> not counted
+
+
 def test_fix_role_hands_role_to_first_installed_stock_app(log):
     adb = FakeAdb()
     adb.installed |= {"com.android.chrome"}

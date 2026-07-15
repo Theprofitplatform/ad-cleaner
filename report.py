@@ -16,13 +16,13 @@ _STYLE = (
 )
 
 
-def _html_page(title, body):
+def _html_page(title: str, body: str) -> str:
     t = html.escape(title)
     return (f"<!doctype html><html><head><meta charset='utf-8'><title>{t}</title>"
             f"<style>{_STYLE}</style></head><body>{body}</body></html>")
 
 
-def render_receipt_html(receipt):
+def render_receipt_html(receipt: dict) -> str:
     """Render a one-page receipt for a single clean. See plan for the dict shape."""
     r = receipt
     verb = "Removed" if r.get("removed") else "Paused"
@@ -40,9 +40,9 @@ def render_receipt_html(receipt):
         items = "".join(f"<li>{html.escape(p)}</li>" for p in pkgs)
         pkg_block = f"<h2>{verb} apps</h2><ul>{items}</ul>"
     battery_line = (f"<p><b>Battery health:</b> {html.escape(str(r['battery_health']))}</p>"
-                     if r.get("battery_health") else "")
+                    if r.get("battery_health") else "")
     most_used_line = (f"<p><b>Most-used apps:</b> {html.escape(str(r['most_used']))}</p>"
-                       if r.get("most_used") else "")
+                      if r.get("most_used") else "")
     body = (
         "<h1>Ad Cleaner — clean receipt</h1>"
         f"<p class='muted'>{html.escape(r.get('when', ''))} &middot; "
@@ -57,7 +57,7 @@ def render_receipt_html(receipt):
     return _html_page("Ad Cleaner receipt", body)
 
 
-def render_history_html(entries):
+def render_history_html(entries: list) -> str:
     """Render the whole action log (newest-first list of dicts) as a table."""
     rows = "".join(
         "<tr>"

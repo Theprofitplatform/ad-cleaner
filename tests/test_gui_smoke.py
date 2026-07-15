@@ -65,10 +65,6 @@ class FakeAdb:
     def shell_text(self, args, timeout=10):
         self.calls.append(args)
         self.commands.append(" ".join(args))
-        if args[:2] == ["pm", "revoke"]:
-            return ""
-        if args[:2] == ["appops", "set"] and "POST_NOTIFICATION" in args:
-            return ""
         if args[:3] == ["pm", "disable-user", "--user"]:
             self.disabled.add(args[-1]); return ""
         if args[:3] == ["pm", "uninstall", "--user"]:
@@ -87,8 +83,6 @@ class FakeAdb:
             return self.globals.get(args[3], "null")
         if args[:3] == ["settings", "put", "global"]:
             self.globals[args[3]] = args[4]; return ""
-        if args[:2] in (["am", "force-stop"], ["appops", "set"], ["settings", "put"]):
-            return ""
         if args == ["pm", "list", "packages", "-d"]:
             return "".join(f"package:{p}\n" for p in self.disabled)
         if args == ["pm", "list", "packages", "-s"]:
@@ -312,6 +306,21 @@ def test_reset_data_from_detail(root, monkeypatch, tmp_path):
     assert ["pm", "clear", "--user", "0", "com.random.adware"] in app.adb.calls
 
 
+def test_block_notifications_from_detail(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.tree.selection_set("com.random.adware"); app._on_select()
+    pump(root, 0.1)
+    app.on_block_notifs()
+    pump(root, 0.6)
+    assert ("pm revoke com.random.adware android.permission.POST_NOTIFICATIONS"
+            in app.adb.commands)
+    assert app.busy is False
+
+
 def test_restrict_data_from_detail(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)
@@ -393,6 +402,7 @@ def test_dns_toggle_sets_and_clears(root, monkeypatch, tmp_path):
     app.on_dns_off()
     pump(root, 0.6)
     assert app.adb.globals.get("private_dns_mode") == "off"
+    assert app.busy is False    # DNS handlers hold the busy flag while working
 
 
 def test_fix_roles_button_restores_and_updates_detail(root, monkeypatch, tmp_path):
@@ -524,6 +534,10 @@ def test_disconnect_clears_stale_battery_report(root, monkeypatch, tmp_path):
     app.battery_report = {"top_drainers": [], "health_pct": 77}
     app._disconnect("No phone connected", "grey")
     assert app.battery_report is None
+    # regression: every action button is disabled again after a disconnect
+    for btn in (app.clean_btn, app.rescan_btn, app.stop_btn, app.crash_btn,
+                *app.bulk_btns, *app.dev_btns, *app.dns_btns, *app.move_btns):
+        assert str(btn["state"]) == "disabled"
 
 
 def test_receipt_most_used_strips_package_suffix_from_label(root, monkeypatch, tmp_path):

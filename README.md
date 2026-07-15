@@ -72,9 +72,20 @@ individual apps), then restart the phone normally.
 | **⏸ Pause** | Freezes one app so it can't run. Fully reversible with **Resume**. |
 | **▶ Resume** | Un-freezes a paused app. |
 | **🗑 Uninstall** | Removes an app for you. Restore it later from the **History** tab. |
+| **🛠 Restore default apps** | In an app's detail panel when it has hijacked your browser, texts, home screen or dialer. Hands the default back to the stock app. |
+| **🔕 Stop its notifications** | In an app's detail panel. Silences an app that floods the phone with notifications. Reversible. |
+| **🚫 Stop fake virus pop-ups (Chrome)** | On the Device tab. Silences Chrome's website notifications — the usual source of "your phone has a virus" scare pop-ups. |
+| **💤 Disable preinstalled junk** | On the Device tab. Switches off known carrier/maker bloat (never uninstalls, so it can't brick the phone; reversible from History). |
+| **📵 Block background data** | In an app's detail panel. Stops an app using mobile data in the background. Reversible. |
 | **🛡️ Block ads (Private DNS)** | On the Device tab. Sends the phone's DNS through an ad-blocking resolver so ads are blocked in **every** app, even ones you keep. Reversible with **Turn off**. |
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.
+
+The scan also flags **junk cleaner/booster/optimizer apps**, and each app's detail
+panel shows extra evidence when the phone reports it: how much **battery** and
+**background data** it uses, how long it's been **on screen recently**, and how
+many **notifications** it posts. The Device tab shows the phone's **battery health**
+(where the phone reports it) and its top battery user; both land on the clean receipt.
 
 ### Stalkerware
 

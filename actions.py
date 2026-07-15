@@ -225,8 +225,11 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
 
     Returns {'stopped', 'acted', 'removed': bool, 'packages': [acted-on pkgs], 'popups_blocked': int}.
     """
-    popups = sum(1 for a in apps if a.overlay and not a.protected)   # before stop_all clears overlay
+    overlay_targets = [a for a in apps if a.overlay and not a.protected]
     stopped, _ = stop_all(adb, apps, log, block_popups=True, progress=progress)
+    # stop_all clears .overlay only when the deny actually succeeded, so this
+    # counts confirmed blocks, not attempts.
+    popups = sum(1 for a in overlay_targets if not a.overlay)
     acted = []
     for app in apps:
         if not will_clean(app):

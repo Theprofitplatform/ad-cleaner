@@ -527,7 +527,7 @@ class AdCleanerApp:
         grid.pack(anchor="w")
         rows = [("💾  Storage", "storage"), ("🧠  Memory (RAM)", "ram"),
                 ("🌡️  Battery temperature", "temp"), ("🔋  Battery level", "battery"),
-                ("🔋  Battery health", "battery_health"),
+                ("🩺  Battery health", "battery_health"),
                 ("⚡  Top battery user", "top_drainer")]
         for i, (label, key) in enumerate(rows):
             ttk.Label(grid, text=label, font=(FONT, 11, "bold")).grid(
@@ -2101,6 +2101,7 @@ class AdCleanerApp:
         if not host:
             messagebox.showinfo("Block ads", "Type a DNS address for the Custom option.")
             return
+        self.busy = True
         self.status_line("Turning on ad blocking…")
 
         def work():
@@ -2117,6 +2118,7 @@ class AdCleanerApp:
     def on_dns_off(self):
         if self.busy or not self.serial:
             return
+        self.busy = True
         self.status_line("Turning off ad blocking…")
 
         def work():
@@ -2129,6 +2131,7 @@ class AdCleanerApp:
         self._run_bg(work)
 
     def _after_dns(self, err, ok_msg=None):
+        self.busy = False
         self._refresh_history()
         if err:
             self.status_line("Couldn't change ad blocking. " + err, "error")

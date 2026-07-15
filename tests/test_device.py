@@ -89,3 +89,46 @@ def test_parse_usage_minutes():
     assert use["com.whatsapp"] == 62
     assert use["com.random.freegift"] == 4
     assert device.parse_usage_minutes("junk") == {}
+
+
+def test_parse_cpu_by_app_merges_and_filters():
+    cpu = device.parse_cpu_by_app(fx("cpuinfo.txt"))
+    d = dict(cpu)
+    assert "com.facebook.katana" in d
+    assert "system_server" not in d          # dot-less daemons dropped
+    assert all(cpu[i][1] >= cpu[i + 1][1] for i in range(len(cpu) - 1))
+    assert device.parse_cpu_by_app("") == []
+    merged = device.parse_cpu_by_app(
+        "  1.0% 1/com.a.b: 1% user\n  0.5% 2/com.a.b:remote: 0.5% user\n")
+    assert merged == [("com.a.b", 1.5)]
+
+
+def test_parse_pss_by_app_reads_fixture():
+    pss = device.parse_pss_by_app(fx("meminfo_pss.txt"))
+    d = dict(pss)
+    assert d["com.facebook.katana"] > 100 * 1024 * 1024
+    assert "surfaceflinger" not in d
+    assert device.parse_pss_by_app("no section here") == []
+
+
+def test_parse_diskstats_reads_fixture():
+    rows, free, total = device.parse_diskstats(fx("diskstats.txt"))
+    assert len(rows) == 12
+    assert free == 86155812 * 1024 and total == 230744064 * 1024
+    assert all(isinstance(v, int) for r in rows for v in r[1:])
+    # mismatched arrays -> no per-package rows, never a crash
+    assert device.parse_diskstats(
+        'Package Names: ["com.a"]\nApp Sizes: [1, 2]\n') == ([], 0, 0)
+    assert device.parse_diskstats("") == ([], 0, 0)
+
+
+def test_read_resource_report():
+    class FakeAdb:
+        def shell_text(self, args, timeout=10):
+            return {"cpuinfo": fx("cpuinfo.txt"), "meminfo": fx("meminfo_pss.txt"),
+                    "diskstats": fx("diskstats.txt")}.get(args[1], "")
+    r = device.read_resource_report(FakeAdb(), top=5)
+    assert len(r["cpu"]) == 5 and len(r["ram"]) == 5 and len(r["storage"]) == 5
+    assert r["disk_total"] > 0
+    pkg, tot, data, cache = r["storage"][0]
+    assert tot >= data + cache and tot > r["storage"][-1][1]

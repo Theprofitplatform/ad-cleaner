@@ -31,6 +31,7 @@ from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
 
 import appicon
+import mirror
 import playstore
 import usbinfo
 
@@ -554,6 +555,9 @@ class AdCleanerApp:
         self.shot_btn = self._flat_button(btns, "📷  Screenshot",
                                           self.on_screenshot, SLATE, SLATE_HOT)
         self.shot_btn.pack(side="left", padx=(0, 8))
+        self.mirror_btn = self._flat_button(btns, "🪞  Mirror phone",
+                                            self.on_mirror, SLATE, SLATE_HOT)
+        self.mirror_btn.pack(side="left", padx=(0, 8))
         self.reboot_btn = self._flat_button(btns, "🔌  Reboot phone",
                                             self.on_reboot, SLATE, SLATE_HOT)
         self.reboot_btn.pack(side="left")
@@ -570,8 +574,8 @@ class AdCleanerApp:
                                             self.on_charge_test, SLATE, SLATE_HOT)
         self.charge_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
-                         self.reboot_btn, self.popups_btn, self.bloat_btn,
-                         self.res_btn, self.charge_btn)
+                         self.mirror_btn, self.reboot_btn, self.popups_btn,
+                         self.bloat_btn, self.res_btn, self.charge_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1991,6 +1995,52 @@ class AdCleanerApp:
                 "normally.", parent=self.res_win, default="yes"):
             return
         self._do_action(lambda: force_stop(self.adb, app, self.log), app, "Stopped")
+
+    def on_mirror(self):
+        """Live view + control of the phone from the PC (scrcpy). Works even
+        with a smashed screen, as long as this computer was already allowed."""
+        if not self.serial:
+            return
+        path = mirror.find_scrcpy()
+        if path:
+            self._launch_mirror(path)
+            return
+        if not messagebox.askyesno(
+                "Download mirroring tool",
+                "Mirroring uses scrcpy, a free open-source tool by Genymobile.\n\n"
+                "Download it now? (~40 MB, one time, from GitHub)", default="yes"):
+            return
+        self._enable_btn(self.mirror_btn, False)
+
+        def work():
+            try:
+                p = mirror.download_scrcpy(progress=lambda f: self._post(
+                    self.status_line, f"Downloading scrcpy… {f:.0%}"))
+                self._post(self._mirror_ready, p, None)
+            except Exception as e:
+                self._post(self._mirror_ready, None, str(e))
+        self._run_bg(work)
+
+    def _mirror_ready(self, path, err):
+        self._enable_btn(self.mirror_btn, True)
+        if not path:
+            messagebox.showerror(
+                "Download failed",
+                "Couldn't download scrcpy.\n\n" + (err or "") +
+                "\n\nYou can download it manually from github.com/Genymobile/scrcpy "
+                "and put the scrcpy folder next to this program.")
+            return
+        self._launch_mirror(path)
+
+    def _launch_mirror(self, path):
+        try:
+            mirror.launch(path, self.adb.adb_path, self.serial,
+                          title=f"{self.model or 'Phone'} — live")
+            self.status_line("Mirror window opening — drive the phone with "
+                             "your mouse and keyboard.")
+        except Exception as e:
+            self.status_line("Couldn't start the mirror. " + self._friendly(str(e)),
+                             "error")
 
     def on_charge_test(self):
         """Live charging readout — verifies a port/cable/charger in seconds.

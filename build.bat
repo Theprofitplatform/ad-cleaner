@@ -12,9 +12,15 @@ echo Downloading Google ADB tools to bundle into the app...
 powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' -OutFile 'pt.zip' -UseBasicParsing; Expand-Archive -Path 'pt.zip' -DestinationPath '.' -Force; Remove-Item 'pt.zip'" || goto :error
 :haveadb
 
+if exist scrcpy\scrcpy.exe goto :havescrcpy
+echo.
+echo Downloading scrcpy (screen mirroring) to bundle into the app...
+powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://github.com/Genymobile/scrcpy/releases/download/v3.3.1/scrcpy-win64-v3.3.1.zip' -OutFile 'sc.zip' -UseBasicParsing; Expand-Archive -Path 'sc.zip' -DestinationPath '.' -Force; Rename-Item 'scrcpy-win64-v3.3.1' 'scrcpy'; Remove-Item 'sc.zip'" || goto :error
+:havescrcpy
+
 echo.
 echo Building AdCleaner.exe ...
-pyinstaller --onefile --windowed --name AdCleaner --add-data "platform-tools;platform-tools" main.py || goto :error
+pyinstaller --onefile --windowed --name AdCleaner --add-data "platform-tools;platform-tools" --add-data "scrcpy;scrcpy" main.py || goto :error
 
 echo.
 echo ============================================================

@@ -24,7 +24,8 @@ from actions import (
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
-from device import GB, read_battery_report, read_device_stats, read_resource_report
+from device import (GB, read_battery_report, read_charging, read_device_stats,
+                    read_resource_report)
 from report import render_history_html, render_receipt_html
 from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
@@ -565,9 +566,12 @@ class AdCleanerApp:
         self.res_btn = self._flat_button(btns, "📊  What's using this phone?",
                                          self.on_resources, SLATE, SLATE_HOT)
         self.res_btn.pack(side="left", padx=(8, 0))
+        self.charge_btn = self._flat_button(btns, "⚡  Test charging port",
+                                            self.on_charge_test, SLATE, SLATE_HOT)
+        self.charge_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.reboot_btn, self.popups_btn, self.bloat_btn,
-                         self.res_btn)
+                         self.res_btn, self.charge_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1987,6 +1991,82 @@ class AdCleanerApp:
                 "normally.", parent=self.res_win, default="yes"):
             return
         self._do_action(lambda: force_stop(self.adb, app, self.log), app, "Stopped")
+
+    def on_charge_test(self):
+        """Live charging readout — verifies a port/cable/charger in seconds.
+        Samples dumpsys battery once a second while the window is open."""
+        if not self.serial:
+            return
+        win = tk.Toplevel(self.root)
+        win.title("Charging port test")
+        win.configure(bg=BASE)
+        tk.Label(win, text="Numbers update live — swap chargers and cables while "
+                           "watching. A computer USB port is always slow: judge the "
+                           "port with a wall charger.",
+                 bg=BASE, fg=MUTED, wraplength=430, justify="left",
+                 padx=14, pady=10).pack(anchor="w")
+        watts_var = tk.StringVar(value="…")
+        detail_var = tk.StringVar(value="reading…")
+        verdict_var = tk.StringVar(value="")
+        peak_var = tk.StringVar(value="")
+        tk.Label(win, textvariable=watts_var, font=(FONT, 34, "bold"),
+                 bg=BASE, fg=INK, padx=14).pack(anchor="w")
+        tk.Label(win, textvariable=detail_var, bg=BASE, fg=MUTED,
+                 padx=14).pack(anchor="w")
+        verdict_lbl = tk.Label(win, textvariable=verdict_var, bg=BASE,
+                               font=(FONT, 11, "bold"), padx=14, pady=8,
+                               wraplength=430, justify="left")
+        verdict_lbl.pack(anchor="w")
+        tk.Label(win, textvariable=peak_var, bg=BASE, fg=MUTED,
+                 padx=14).pack(anchor="w", pady=(0, 12))
+        peak = {"w": 0.0}
+        self.charge_win = win
+
+        def show(c):
+            if not win.winfo_exists():
+                return
+            if c and c["source"]:
+                watts_var.set(f"{c['watts']:g} W")
+                extra = (f" · charger offers up to {c['max_watts']:g} W"
+                         if c["max_watts"] else "")
+                detail_var.set(f"{c['volts']:g} V × {c['amps']:g} A · "
+                               f"{c['source']} power{extra}")
+                peak["w"] = max(peak["w"], c["watts"])
+                peak_var.set(f"Peak this test: {peak['w']:g} W")
+                if c["watts"] >= 15:
+                    verdict_var.set("✅ Fast charging — the port is delivering properly.")
+                    verdict_lbl.config(fg=GREEN)
+                elif c["watts"] >= 7.5:
+                    verdict_var.set("✅ Charging at normal speed.")
+                    verdict_lbl.config(fg=GREEN)
+                elif c["watts"] > 0:
+                    verdict_var.set("🐢 Slow charge — normal on a computer port. "
+                                    "Plug in a wall charger to judge the port.")
+                    verdict_lbl.config(fg=AMBER)
+                else:
+                    verdict_var.set("🔌 Charging (this phone doesn't report its speed).")
+                    verdict_lbl.config(fg=MUTED)
+            else:
+                watts_var.set("0 W")
+                detail_var.set("no power source detected")
+                verdict_var.set("❌ Nothing coming in — try a wall charger and a "
+                                "known-good cable. Still nothing = port fault.")
+                verdict_lbl.config(fg=RED)
+            win.after(1000, sample)
+
+        def sample():
+            if not win.winfo_exists() or not self.alive or not self.serial:
+                return
+
+            def work():
+                try:
+                    c = read_charging(self.adb)
+                except Exception:
+                    c = None
+                self._post(show, c)
+            self._run_bg(work)
+
+        sample()
 
     def on_clear_caches(self):
         if self.busy or not self.serial:

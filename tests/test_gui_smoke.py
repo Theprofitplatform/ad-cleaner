@@ -627,6 +627,24 @@ def test_end_task_stops_user_app_and_refuses_system_process(root, monkeypatch, t
     app.res_win.destroy()
 
 
+def test_charge_test_window_shows_live_watts(root, monkeypatch, tmp_path):
+    """Charging port test window opens and renders a sample with a verdict."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    monkeypatch.setattr(gui, "read_charging", lambda adb: {
+        "source": "AC", "charging": True, "volts": 9.0, "amps": 2.8,
+        "watts": 25.2, "max_watts": 27.0})
+    app.on_charge_test()
+    pump(root, 1.0)
+    assert app.charge_win.winfo_exists()
+    texts = [w.cget("text") for w in app.charge_win.winfo_children()
+             if isinstance(w, tkinter.Label)]
+    assert any("25.2 W" in t for t in texts)
+    assert any("Fast charging" in t for t in texts)
+    app.charge_win.destroy()
+
+
 def test_resource_hogs_error_reenables_button(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

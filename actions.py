@@ -46,7 +46,7 @@ class ActionLog:
     def _save(self):
         self.path.write_text(json.dumps(self.entries, indent=2), encoding="utf-8")
 
-    def append(self, serial, package, action, previous, command, result):
+    def append(self, serial, package, action, previous, command, result, apk=None):
         entry = {
             "time": datetime.now().isoformat(timespec="seconds"),
             "serial": serial,
@@ -56,6 +56,8 @@ class ActionLog:
             "command": " ".join(command) if isinstance(command, list) else command,
             "result": result,
         }
+        if apk:
+            entry["apk"] = apk
         self.entries.append(entry)
         self._save()
         return entry
@@ -132,13 +134,19 @@ def resume(adb, app, log):
 
 
 def uninstall(adb, app, log):
-    """Remove for user 0. Auto-neutralises accessibility + device-admin first."""
+    """Remove for user 0. Auto-neutralises accessibility + device-admin first,
+    and saves the APK(s) so History → Undo works even for sideloaded apps."""
     _guard(app)
     if getattr(app, "active_accessibility", False):
         try:
             disable_accessibility(adb, app.package, log)  # stop it re-granting/blocking
         except AdbError:
             pass
+    saved = []
+    try:
+        saved = backup_apk(adb, app, data_dir() / "apk_backups")
+    except Exception:
+        pass          # ponytail: best-effort net; install-existing still covers most apps
     cmd = ["pm", "uninstall", "--user", "0", app.package]
     try:
         adb.shell_text(cmd)
@@ -150,7 +158,7 @@ def uninstall(adb, app, log):
             raise
     ok = not _is_installed(adb, app.package)
     log.append(adb.serial, app.package, "uninstall", app.status, cmd,
-               "ok" if ok else "failed")
+               "ok" if ok else "failed", apk=saved or None)
     return ok
 
 
@@ -458,7 +466,19 @@ def undo(adb, entry, log):
             adb.shell_text(cmd)
     elif action == "uninstall":
         cmd = ["cmd", "package", "install-existing", pkg]
-        adb.shell_text(cmd)
+        try:
+            adb.shell_text(cmd)
+            restored = _installed(adb, pkg)
+        except AdbError:
+            restored = False
+        if not restored:
+            apks = [p for p in entry.get("apk") or [] if Path(p).exists()]
+            if not apks:
+                raise AdbError("Android no longer has this app's install file and "
+                               "no backup was saved, so it can't be restored.")
+            cmd = (["install", "-r"] + apks if len(apks) == 1
+                   else ["install-multiple", "-r"] + apks)
+            adb.run(cmd, timeout=120)
     elif action == "block-popup":
         cmd = ["appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"]
         adb.shell_text(cmd)

@@ -26,7 +26,7 @@ from bloatware import find_bloat
 from crashes import read_crash_report, summarize
 from device import (GB, read_battery_report, read_charging, read_device_stats,
                     read_resource_report)
-from report import render_history_html, render_receipt_html
+from report import render_history_html, render_intake_html, render_receipt_html
 from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
 from setup_helper import download_platform_tools
 
@@ -37,7 +37,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
@@ -573,9 +573,13 @@ class AdCleanerApp:
         self.charge_btn = self._flat_button(btns, "⚡  Test charging port",
                                             self.on_charge_test, SLATE, SLATE_HOT)
         self.charge_btn.pack(side="left", padx=(8, 0))
+        self.intake_btn = self._flat_button(btns, "📋  Condition report",
+                                            self.on_intake_report, SLATE, SLATE_HOT)
+        self.intake_btn.pack(side="left", padx=(8, 0))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.mirror_btn, self.reboot_btn, self.popups_btn,
-                         self.bloat_btn, self.res_btn, self.charge_btn)
+                         self.bloat_btn, self.res_btn, self.charge_btn,
+                         self.intake_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -1995,6 +1999,53 @@ class AdCleanerApp:
                 "normally.", parent=self.res_win, default="yes"):
             return
         self._do_action(lambda: force_stop(self.adb, app, self.log), app, "Stopped")
+
+    def on_intake_report(self):
+        """Printable drop-off condition report — device identity, health,
+        scan summary, signature line. Opens in the browser for print/PDF."""
+        if not self.serial:
+            return
+        self._enable_btn(self.intake_btn, False)
+
+        def work():
+            try:
+                stats = read_device_stats(self.adb)
+            except Exception:
+                stats = {}
+            info = {
+                "when": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "model": getattr(self, "model", "") or "",
+                "android": getattr(self, "android", "") or "",
+                "serial": self.serial or "",
+                "battery_level": (f"{stats['battery_level']}%"
+                                  if stats.get("battery_level") is not None else ""),
+                "battery_temp": (f"{stats['battery_temp_c']} °C"
+                                 if stats.get("battery_temp_c") is not None else ""),
+                "storage": (f"{stats['storage_used_gb']} GB used of "
+                            f"{stats['storage_total_gb']} GB"
+                            if stats.get("storage_total_gb") else ""),
+                "ram": (f"{stats['ram_total_gb']} GB"
+                        if stats.get("ram_total_gb") else ""),
+                "app_count": len(self.apps),
+                "risky": [a.label.split(" (")[0] or a.package
+                          for a in self.apps if a.risk in SUSPICIOUS],
+            }
+            if self.battery_report and self.battery_report["health_pct"]:
+                info["battery_health"] = (
+                    f"{self.battery_report['health_pct']}% of original capacity")
+            folder = data_dir() / "reports"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"intake_{datetime.now():%Y%m%d_%H%M%S}.html"
+            path.write_text(render_intake_html(info), encoding="utf-8")
+            self._post(self._intake_done, path)
+        self._run_bg(work)
+
+    def _intake_done(self, path):
+        self._enable_btn(self.intake_btn, True)
+        self.intake_path = path      # tests + "where did it go"
+        webbrowser.open(path.as_uri())
+        self.status_line("Condition report opened — print it (Ctrl+P) and have "
+                         "the customer sign. Saved in adcleaner_data\\reports.")
 
     def on_mirror(self):
         """Live view + control of the phone from the PC (scrcpy). Works even

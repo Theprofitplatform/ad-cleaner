@@ -627,6 +627,21 @@ def test_end_task_stops_user_app_and_refuses_system_process(root, monkeypatch, t
     app.res_win.destroy()
 
 
+def test_intake_report_writes_and_opens_html(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    opened = []
+    monkeypatch.setattr(gui.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(gui, "data_dir", lambda: tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.on_intake_report()
+    pump(root, 1.0)
+    text = app.intake_path.read_text(encoding="utf-8")
+    assert "Phone condition report" in text and "S1" in text   # serial present
+    assert "Customer signature" in text
+    assert opened                                              # browser launched
+
+
 def test_mirror_button_launches_scrcpy_with_serial(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

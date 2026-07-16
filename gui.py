@@ -17,7 +17,8 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, debloat, fix_role, pause, read_private_dns,
+    clean_risky, clear_caches, clear_private_dns, debloat, fix_role, force_stop,
+    pause, read_private_dns,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
 )
@@ -1621,7 +1622,8 @@ class AdCleanerApp:
 
     def _do_action(self, fn, app, verb, removes=False):
         self.busy = True
-        self.status_line(f"{verb[:-1]}ing {app.label.split(' (')[0]}…")
+        ing = {"Reset": "Resetting", "Stopped": "Stopping"}.get(verb, f"{verb[:-1]}ing")
+        self.status_line(f"{ing} {app.label.split(' (')[0]}…")
 
         def work():
             try:
@@ -1920,7 +1922,7 @@ class AdCleanerApp:
             for r in RISK_BG:
                 t.tag_configure(r, background=RISK_BG[r], foreground=RISK_FG[r])
             for pkg, val in rows:
-                t.insert("", "end",
+                t.insert("", "end", iid=pkg,
                          values=(label.get(pkg) or KNOWN_LABELS.get(pkg, pkg), val),
                          tags=(risk.get(pkg, ""),))
             if not rows:
@@ -1928,10 +1930,59 @@ class AdCleanerApp:
             t.pack(fill="both", expand=True, pady=(4, 0))
             self.res_trees.append(t)
         row.rowconfigure(0, weight=1)
+
+        # Task-manager style "End task": button + right-click, on any panel.
+        menu = tk.Menu(win, tearoff=0)
+        menu.add_command(label="⛔  End task (force-stop)", command=self._end_task)
+
+        def popup(ev):
+            iid = ev.widget.identify_row(ev.y)
+            if "." in iid:               # empty-state rows get dotless auto ids
+                ev.widget.selection_set(iid)
+                menu.tk_popup(ev.x_root, ev.y_root)
+
+        for t in self.res_trees:
+            t.bind("<Button-3>", popup)
+            t.bind("<<TreeviewSelect>>", self._res_select)
+        ttk.Button(win, text="⛔  End task", command=self._end_task).pack(
+            anchor="w", padx=12, pady=(6, 0))
         tk.Label(win, text="Coloured rows were flagged risky by the scan. "
                            "CPU is averaged over the last few minutes.",
                  bg=BASE, fg=MUTED, padx=12, pady=8).pack(anchor="w")
         self.res_win = win
+
+    def _res_select(self, ev):
+        """One selection across the three hog panels (they are one list to
+        the user), so End task always acts on the row that looks selected."""
+        for t in self.res_trees:
+            if t is not ev.widget and t.selection():
+                t.selection_remove(*t.selection())
+
+    def _end_task(self):
+        if self.busy or not self.serial:
+            return
+        pkg = next((t.selection()[0] for t in self.res_trees if t.selection()), "")
+        if "." not in pkg:
+            self.status_line("Pick an app in one of the lists first.")
+            return
+        app = next((a for a in self.apps if a.package == pkg), None)
+        if app is None:
+            # dumpsys ranks system processes too; only user-installed apps
+            # are safe to kill (same boundary as every other action here)
+            messagebox.showinfo(
+                "Can't stop that one",
+                f"“{KNOWN_LABELS.get(pkg, pkg)}” is part of the phone's system. "
+                "Stopping it could make the phone misbehave, so this tool only "
+                "ends apps that were installed by the user.", parent=self.res_win)
+            return
+        name = app.label.split(" (")[0]
+        if not messagebox.askyesno(
+                "End task",
+                f"Force-stop “{name}”?\n\nIt closes right now, like “End task” in "
+                "Task Manager. Nothing is deleted — it can be opened again "
+                "normally.", parent=self.res_win, default="yes"):
+            return
+        self._do_action(lambda: force_stop(self.adb, app, self.log), app, "Stopped")
 
     def on_clear_caches(self):
         if self.busy or not self.serial:

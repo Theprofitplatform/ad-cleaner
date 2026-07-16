@@ -33,6 +33,10 @@ import appicon
 import playstore
 import usbinfo
 
+# Bumped on every user-facing PR (GO workflow), so a bench machine or a
+# customer screenshot tells you exactly which exe it is.
+APP_VERSION = "1.1.0"
+
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
 BASE = "#ffffff"       # window / table background
@@ -176,7 +180,7 @@ def _push_media(adb, src):
 class AdCleanerApp:
     def __init__(self, root):
         self.root = root
-        root.title("Ad Cleaner")
+        root.title(f"Ad Cleaner  v{APP_VERSION}")
         root.geometry("1080x740")
         root.minsize(900, 600)
 

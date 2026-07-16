@@ -57,6 +57,41 @@ def render_receipt_html(receipt: dict) -> str:
     return _html_page("Ad Cleaner receipt", body)
 
 
+def render_intake_html(info: dict) -> str:
+    """Printable drop-off condition report: device identity, health numbers,
+    scan summary, then a handwritten-notes box and a signature line. Protects
+    both sides of the counter ('that was already like that when you brought
+    it in')."""
+    i = info
+
+    def row(label, key):
+        v = i.get(key)
+        return f"<p><b>{label}:</b> {html.escape(str(v))}</p>" if v else ""
+
+    risky = i.get("risky") or []
+    risky_block = ("<ul>" + "".join(f"<li>{html.escape(p)}</li>" for p in risky)
+                   + "</ul>" if risky else "<p class='muted'>none flagged</p>")
+    body = (
+        "<h1>Phone condition report</h1>"
+        f"<p class='muted'>{html.escape(i.get('when', ''))}</p>"
+        "<h2>Device</h2>"
+        + row("Model", "model") + row("Android version", "android")
+        + row("Serial number", "serial")
+        + "<h2>Health at drop-off</h2>"
+        + row("Battery level", "battery_level")
+        + row("Battery health", "battery_health")
+        + row("Battery temperature", "battery_temp")
+        + row("Storage", "storage") + row("Memory (RAM)", "ram")
+        + f"<h2>Apps</h2><p><b>Downloaded apps:</b> {i.get('app_count', 0)}</p>"
+        + "<p><b>Flagged risky by the scan:</b></p>" + risky_block
+        + "<h2>Physical condition / notes</h2>"
+        + "<div style='height:110px; border:1px solid #cbd5e1'></div>"
+        + "<p style='margin-top:28px'>Customer signature: ____________________________"
+        + "&nbsp;&nbsp;&nbsp;Date: ______________</p>"
+    )
+    return _html_page("Phone condition report", body)
+
+
 def render_history_html(entries: list) -> str:
     """Render the whole action log (newest-first list of dicts) as a table."""
     rows = "".join(
@@ -87,6 +122,17 @@ def demo():
     with_used = render_receipt_html({**r, "most_used": "WhatsApp (62 min), Chrome (30 min)"})
     assert "Most-used apps" in with_used and "WhatsApp (62 min)" in with_used
     assert "Most-used apps" not in out
+    intake = render_intake_html({
+        "when": "2026-07-16 15:00", "model": "SM-S938B", "android": "16",
+        "serial": "R5GL24XWASL", "battery_level": "76%",
+        "battery_health": "100% of original capacity", "battery_temp": "28.5 °C",
+        "storage": "180.2 GB used of 256.0 GB", "ram": "12.0 GB",
+        "app_count": 41, "risky": ["Free Gift <Deluxe>"]})
+    assert "R5GL24XWASL" in intake and "Customer signature" in intake
+    assert "Free Gift &lt;Deluxe&gt;" in intake                # escaped
+    assert "none flagged" in render_intake_html({"app_count": 0}).lower()
+    assert "Battery health" not in render_intake_html({"app_count": 0})
+
     hist = render_history_html([{"time": "t", "package": "<b>x", "action": "pause", "result": "ok"}])
     assert "<b>x" not in hist and "&lt;b&gt;x" in hist
     print("report.py demo OK")

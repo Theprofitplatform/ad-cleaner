@@ -319,7 +319,7 @@ def test_uninstall_backs_up_apk_first(log, tmp_path, monkeypatch):
     app = App(package="com.random.adware", installer=None)
     assert uninstall(adb, app, log) is True
     entry = log.recent()[0]
-    assert entry["apk"] == [str(tmp_path / "apk_backups" / "com.random.adware.apk")]
+    assert entry["apk"] == [str(tmp_path / "apk_backups" / "TEST" / "com.random.adware.apk")]
     assert Path(entry["apk"][0]).exists()
 
 
@@ -340,7 +340,7 @@ def test_undo_uninstall_falls_back_to_saved_apk(log, tmp_path, monkeypatch):
     app = App(package="com.random.adware", installer=None)
     uninstall(adb, app, log)
     assert undo(adb, log.recent()[0], log) is True
-    apk = str(tmp_path / "apk_backups" / "com.random.adware.apk")
+    apk = str(tmp_path / "apk_backups" / "TEST" / "com.random.adware.apk")
     assert ["install", "-r", apk] in adb.calls
 
 

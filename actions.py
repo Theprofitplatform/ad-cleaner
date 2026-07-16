@@ -144,7 +144,8 @@ def uninstall(adb, app, log):
             pass
     saved = []
     try:
-        saved = backup_apk(adb, app, data_dir() / "apk_backups")
+        saved = backup_apk(adb, app,
+                           data_dir() / "apk_backups" / str(adb.serial).replace(":", "-"))
     except Exception:
         pass          # ponytail: best-effort net; install-existing still covers most apps
     cmd = ["pm", "uninstall", "--user", "0", app.package]

@@ -40,6 +40,40 @@ def parse_battery(text):
     return temp, level
 
 
+def parse_charging(text):
+    """`dumpsys battery` -> charging telemetry for the port test.
+
+    Fields are anchored to line starts so the Samsung event-log tail (which
+    repeats `voltage:`/`status:` mid-line) can't shadow the live values.
+    current is µA, voltage mV, max charging current/voltage µA/µV.
+    """
+    def num(field):
+        m = re.search(rf"^\s*{field}:\s*(-?\d+)", text or "", re.MULTILINE)
+        return int(m.group(1)) if m else 0
+
+    source = next((n for n in ("AC", "USB", "Wireless", "Dock")
+                   if re.search(rf"^\s*{n} powered: true", text or "",
+                                re.MULTILINE | re.IGNORECASE)), None)
+    volts = num("voltage") / 1000.0
+    amps = abs(num("current now")) / 1e6      # sign convention varies by OEM
+    max_w = (num("Max charging current") / 1e6) * (num("Max charging voltage") / 1e6)
+    return {"source": source, "charging": num("status") == 2,
+            "volts": round(volts, 2), "amps": round(amps, 2),
+            "watts": round(volts * amps, 1), "max_watts": round(max_w, 1)}
+
+
+def read_charging(adb):
+    """One telemetry sample. Falls back to sysfs for the current reading on
+    phones whose dumpsys battery has no `current now` line (e.g. Pixels)."""
+    c = parse_charging(_safe(adb, ["dumpsys", "battery"]))
+    if c["source"] and not c["amps"]:
+        raw = _safe(adb, ["cat", "/sys/class/power_supply/battery/current_now"]).strip()
+        if re.fullmatch(r"-?\d+", raw):
+            c["amps"] = round(abs(int(raw)) / 1e6, 2)
+            c["watts"] = round(c["volts"] * c["amps"], 1)
+    return c
+
+
 def _safe(adb, args):
     try:
         return adb.shell_text(args)
@@ -208,6 +242,16 @@ def demo():
 
     temp, level = parse_battery("  level: 85\n  temperature: 305\n  health: 2\n")
     assert temp == 30.5 and level == 85
+
+    c = parse_charging(
+        "  AC powered: false\n  USB powered: true\n"
+        "  Max charging current: 3000000\n  Max charging voltage: 9000000\n"
+        "  status: 2\n  voltage: 4167\n  current now: 406250\n"
+        # Samsung event-log tail: mid-line fields must not shadow live values
+        "07-16 14:18:26  Sending ACTION_BATTERY_CHANGED: status:3, voltage:9999,\n")
+    assert c == {"source": "USB", "charging": True, "volts": 4.17,
+                 "amps": 0.41, "watts": 1.7, "max_watts": 27.0}
+    assert parse_charging("  AC powered: false\n  USB powered: false\n")["source"] is None
 
     use = parse_data_use("uid=10231 set=DEFAULT rb=100 tb=50\n")
     assert use == {10231: 150} and parse_data_use("") == {}

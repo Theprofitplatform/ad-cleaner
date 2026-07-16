@@ -19,7 +19,7 @@ from adb import app_dir, data_dir
 
 # ponytail: pinned release, not "latest" — GitHub's latest-URL redirects are
 # per-asset-name and scrcpy renames its zip every version. Bump when needed.
-SCRCPY_VERSION = "3.3.1"
+SCRCPY_VERSION = "4.1"     # 3.x servers crash on Android 16
 SCRCPY_URL = (f"https://github.com/Genymobile/scrcpy/releases/download/"
               f"v{SCRCPY_VERSION}/scrcpy-win64-v{SCRCPY_VERSION}.zip")
 

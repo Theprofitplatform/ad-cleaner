@@ -90,6 +90,17 @@ def pause(adb, app, log):
     return ok
 
 
+def force_stop(adb, app, log):
+    """End task (like Task Manager): `am force-stop`. The app closes now and
+    restarts normally on next launch; nothing is deleted or disabled."""
+    _guard(app)
+    cmd = ["am", "force-stop", app.package]
+    adb.shell_text(cmd)          # no output on success; no-exception == stopped
+    app.stopped = True
+    log.append(adb.serial, app.package, "force-stop", "running", cmd, "ok")
+    return True
+
+
 def debloat(adb, package, log):
     """Disable a preinstalled junk package. Only exact members of the curated
     bloat list may be touched -- the list is the safety authorization

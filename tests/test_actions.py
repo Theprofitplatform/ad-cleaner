@@ -6,7 +6,8 @@ import actions
 import playstore
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role, pause,
+    clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role,
+    force_stop, pause,
     read_private_dns, reboot, reset_app_data, restrict_background, resume, set_private_dns,
     stop_all, undo, uninstall, will_clean,
 )
@@ -114,6 +115,22 @@ def test_pause_protected_raises_and_touches_nothing(log):
         pause(adb, PROTECTED, log)
     assert adb.calls == []  # guard fires before any device command
     assert log.entries == []
+
+
+def test_force_stop_stops_and_logs(log):
+    adb = FakeAdb()
+    app = App(package="com.random.adware", installer=None)
+    assert force_stop(adb, app, log) is True
+    assert app.stopped is True
+    assert ["am", "force-stop", "com.random.adware"] in adb.calls
+    assert log.entries[-1]["action"] == "force-stop"
+
+
+def test_force_stop_protected_raises_and_touches_nothing(log):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        force_stop(adb, PROTECTED, log)
+    assert adb.calls == [] and log.entries == []
 
 
 def test_uninstall_protected_raises(log):

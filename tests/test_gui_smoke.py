@@ -602,6 +602,31 @@ def test_resource_hogs_window(root, monkeypatch, tmp_path):
     app.res_win.destroy()
 
 
+def test_end_task_stops_user_app_and_refuses_system_process(root, monkeypatch, tmp_path):
+    """Task-manager 'End task' in the hogs window: force-stops a selected
+    user app, refuses processes that aren't in the third-party inventory."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    monkeypatch.setattr(gui, "read_resource_report", lambda adb, top=10: {
+        "cpu": [("com.random.adware", 4.2), ("com.android.systemui", 2.0)],
+        "ram": [], "storage": [], "disk_free": 0, "disk_total": 0})
+    app.on_resources()
+    pump(root, 1.0)
+    cpu = app.res_trees[0]
+
+    cpu.selection_set("com.random.adware")
+    app._end_task()          # askyesno is stubbed to True in _wire
+    pump(root, 1.0)
+    assert ["am", "force-stop", "com.random.adware"] in app.adb.calls
+
+    cpu.selection_set("com.android.systemui")
+    app._end_task()          # showinfo is stubbed; must NOT touch the device
+    pump(root, 0.5)
+    assert ["am", "force-stop", "com.android.systemui"] not in app.adb.calls
+    app.res_win.destroy()
+
+
 def test_resource_hogs_error_reenables_button(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

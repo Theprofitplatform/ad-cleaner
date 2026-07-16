@@ -15,7 +15,7 @@ powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://dl.google.com/an
 if exist scrcpy\scrcpy.exe goto :havescrcpy
 echo.
 echo Downloading scrcpy (screen mirroring) to bundle into the app...
-powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://github.com/Genymobile/scrcpy/releases/download/v3.3.1/scrcpy-win64-v3.3.1.zip' -OutFile 'sc.zip' -UseBasicParsing; Expand-Archive -Path 'sc.zip' -DestinationPath '.' -Force; Rename-Item 'scrcpy-win64-v3.3.1' 'scrcpy'; Remove-Item 'sc.zip'" || goto :error
+powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-win64-v4.1.zip' -OutFile 'sc.zip' -UseBasicParsing; Expand-Archive -Path 'sc.zip' -DestinationPath '.' -Force; Rename-Item 'scrcpy-win64-v4.1' 'scrcpy'; Remove-Item 'sc.zip'" || goto :error
 :havescrcpy
 
 echo.

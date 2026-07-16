@@ -37,7 +37,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
@@ -544,38 +544,37 @@ class AdCleanerApp:
             lbl.grid(row=i, column=1, sticky="w", pady=6)
             self.dev_labels[key] = lbl
 
+        # two rows: look (diagnose) on top, act (change the phone) below
         btns = ttk.Frame(tab)
         btns.pack(anchor="w", pady=(18, 0))
         self.dev_refresh_btn = self._flat_button(btns, "🔄  Refresh",
                                                  self.on_dev_refresh, SLATE, SLATE_HOT)
-        self.dev_refresh_btn.pack(side="left", padx=(0, 8))
-        self.cache_btn = self._flat_button(btns, "🧹  Clear app caches",
-                                           self.on_clear_caches, GREEN, GREEN_HOT)
-        self.cache_btn.pack(side="left", padx=(0, 8))
         self.shot_btn = self._flat_button(btns, "📷  Screenshot",
                                           self.on_screenshot, SLATE, SLATE_HOT)
-        self.shot_btn.pack(side="left", padx=(0, 8))
         self.mirror_btn = self._flat_button(btns, "🪞  Mirror phone",
                                             self.on_mirror, SLATE, SLATE_HOT)
-        self.mirror_btn.pack(side="left", padx=(0, 8))
-        self.reboot_btn = self._flat_button(btns, "🔌  Reboot phone",
-                                            self.on_reboot, SLATE, SLATE_HOT)
-        self.reboot_btn.pack(side="left")
-        self.popups_btn = self._flat_button(btns, "🚫  Stop fake virus pop-ups (Chrome)",
-                                            self.on_chrome_popups, AMBER, AMBER_HOT)
-        self.popups_btn.pack(side="left", padx=(8, 0))
-        self.bloat_btn = self._flat_button(btns, "💤  Disable preinstalled junk",
-                                           self.on_debloat, AMBER, AMBER_HOT)
-        self.bloat_btn.pack(side="left", padx=(8, 0))
         self.res_btn = self._flat_button(btns, "📊  What's using this phone?",
                                          self.on_resources, SLATE, SLATE_HOT)
-        self.res_btn.pack(side="left", padx=(8, 0))
         self.charge_btn = self._flat_button(btns, "⚡  Test charging port",
                                             self.on_charge_test, SLATE, SLATE_HOT)
-        self.charge_btn.pack(side="left", padx=(8, 0))
         self.intake_btn = self._flat_button(btns, "📋  Condition report",
                                             self.on_intake_report, SLATE, SLATE_HOT)
-        self.intake_btn.pack(side="left", padx=(8, 0))
+        for b in (self.dev_refresh_btn, self.shot_btn, self.mirror_btn,
+                  self.res_btn, self.charge_btn, self.intake_btn):
+            b.pack(side="left", padx=(0, 8))
+
+        btns2 = ttk.Frame(tab)
+        btns2.pack(anchor="w", pady=(8, 0))
+        self.cache_btn = self._flat_button(btns2, "🧹  Clear app caches",
+                                           self.on_clear_caches, GREEN, GREEN_HOT)
+        self.reboot_btn = self._flat_button(btns2, "🔌  Reboot phone",
+                                            self.on_reboot, SLATE, SLATE_HOT)
+        self.popups_btn = self._flat_button(btns2, "🚫  Stop fake virus pop-ups (Chrome)",
+                                            self.on_chrome_popups, AMBER, AMBER_HOT)
+        self.bloat_btn = self._flat_button(btns2, "💤  Disable preinstalled junk",
+                                           self.on_debloat, AMBER, AMBER_HOT)
+        for b in (self.cache_btn, self.reboot_btn, self.popups_btn, self.bloat_btn):
+            b.pack(side="left", padx=(0, 8))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.mirror_btn, self.reboot_btn, self.popups_btn,
                          self.bloat_btn, self.res_btn, self.charge_btn,

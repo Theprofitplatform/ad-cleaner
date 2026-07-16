@@ -627,6 +627,19 @@ def test_end_task_stops_user_app_and_refuses_system_process(root, monkeypatch, t
     app.res_win.destroy()
 
 
+def test_mirror_button_launches_scrcpy_with_serial(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    seen = {}
+    monkeypatch.setattr(gui.mirror, "find_scrcpy", lambda: "scrcpy.exe")
+    monkeypatch.setattr(gui.mirror, "launch",
+                        lambda path, adb, serial, title: seen.update(serial=serial))
+    app.on_mirror()
+    pump(root, 0.3)
+    assert seen["serial"] == "S1"
+
+
 def test_charge_test_window_shows_live_watts(root, monkeypatch, tmp_path):
     """Charging port test window opens and renders a sample with a verdict."""
     _wire(gui, monkeypatch, tmp_path)

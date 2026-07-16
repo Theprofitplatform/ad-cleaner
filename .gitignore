@@ -4,8 +4,9 @@ build/
 build_work/
 *.spec
 
-# Bundled ADB (downloaded by build.bat / at first run — not source)
+# Bundled ADB + scrcpy (downloaded by build.bat / at first run — not source)
 platform-tools/
+scrcpy/
 *.zip
 
 # App runtime data

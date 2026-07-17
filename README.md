@@ -48,6 +48,19 @@ The app walks you through this on screen, but here it is in full:
 5. On the phone, tap **Allow** when it asks about USB debugging.
    Tick **"Always allow from this computer."**
 
+## No cable? Connect over Wi-Fi
+
+Some phones' USB ports (or cables) charge fine but can't carry data, so the
+phone never shows up. If that happens, use **📶 Connect over Wi-Fi…** in the
+connect wizard instead:
+
+1. Make sure the **phone and this PC are on the same Wi-Fi network**.
+2. On the phone: **Developer options → Wireless debugging** → turn it on.
+3. The first time, tap **"Pair device with pairing code"** and enter the code
+   and pairing address it shows into the wizard.
+4. Then enter the **connect address** (also shown on that screen) and click
+   **Connect**.
+
 ## If pop-up ads are covering the screen
 
 Some ad apps throw up pop-ups so fast you can't tap anything. Start the phone in
@@ -78,6 +91,11 @@ individual apps), then restart the phone normally.
 | **💤 Disable preinstalled junk** | On the Device tab. Switches off known carrier/maker bloat (never uninstalls, so it can't brick the phone; reversible from History). |
 | **📵 Block background data** | In an app's detail panel. Stops an app using mobile data in the background. Reversible. |
 | **🛡️ Block ads (Private DNS)** | On the Device tab. Sends the phone's DNS through an ad-blocking resolver so ads are blocked in **every** app, even ones you keep. Reversible with **Turn off**. |
+| **🗂 Find big files** | On the Device tab. Lists the biggest files on the phone's shared storage (old videos, downloads) so you can delete the ones you don't need. **Deleting a file here is permanent** — it does not go to a recycle bin. |
+| **🖐 Stop screen control** | In an app's detail panel. Switches off an app's ability to control the screen (its "accessibility" access) — useful for apps that block taps or won't let you uninstall them. Reversible from History. |
+| **📲 Smart Switch (transfer data)** | On the Device tab. Opens Samsung's Smart Switch on the phone so you can send apps, texts and more to a new phone, cable-to-cable. |
+| **🏪 Shop details…** | On the History tab. Enter your shop's name and contact details once and they'll print at the top of every receipt and condition report. |
+| **📶 Connect over Wi-Fi…** | In the connect wizard. For phones whose USB port charges but won't carry data — connects wirelessly instead of over the cable. |
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.
 
@@ -100,7 +118,12 @@ Stalkerware detection data © Echap (stalkerware-indicators), CC-BY.
 
 Every change is recorded on the **History / Undo** tab. Select any entry and
 click **Undo** to reverse it (re-enable an app, restore a pop-up permission, or
-re-install something you removed).
+re-install something you removed) — this works even for apps that were
+**sideloaded** (installed outside the Play Store), because Ad Cleaner saves a
+copy of the app (`adcleaner_data/apk_backups/`) before removing it.
+
+Files deleted with **🗂 Find big files** are the one exception — that deletion
+is **permanent** and can't be undone from History.
 
 After a clean, Ad Cleaner saves a **printable receipt** (in `adcleaner_data/reports/`)
 listing what it closed, blocked and removed — handy when cleaning someone else's
@@ -145,6 +168,8 @@ purpose. The easy built-in ways:
   - Make sure **USB debugging** is turned on (steps above).
   - Install a phone driver on this PC: **Samsung USB drivers** for Samsung
     phones, or a **universal ADB driver** for any brand.
+- **Phone charges but is never detected** → the cable or the phone's USB port
+  may be data-dead — use **📶 Connect over Wi-Fi** instead.
 - **An app won't uninstall** → It may be a "device administrator". The program
   tries to remove that automatically; if it still won't go, the window shows what
   to do.

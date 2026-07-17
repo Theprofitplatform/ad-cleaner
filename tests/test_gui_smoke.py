@@ -741,8 +741,34 @@ def test_wifi_connect_worker(root, monkeypatch, tmp_path):
     results = []
     app._wifi_connect_bg("1.2.3.4:5555", "", "", lambda ok, msg: results.append((ok, msg)))
     pump(root, 0.5)
+    # the worker builds its own serial-free Adb (see next test), so the
+    # "connect" call lands on that instance, not app.adb -- assert via the
+    # success message the fake's run() returns rather than app.adb.calls.
     assert results and results[0][0] is True
-    assert ["connect", "1.2.3.4:5555"] in app.adb.calls
+    assert "connected to 1.2.3.4:5555" in results[0][1]
+
+
+def test_wifi_connect_worker_ignores_active_usb_serial(root, monkeypatch, tmp_path):
+    """pair/connect are global adb ops -- if the 2s poll connects a USB phone
+    while the Wi-Fi dialog is open, self.adb gets a -s <usb_serial> binding.
+    The worker must build a serial-free Adb instance, not reuse self.adb, or
+    a wifi op would get misdirected to that USB phone via `-s`."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.adb.serial = "USBSERIAL123"          # simulate a USB phone connected mid-dialog
+    captured = {}
+
+    def fake_wifi_connect(adb, conn, pair, code):
+        captured["adb"] = adb
+        return True, "connected to 1.2.3.4:5555"
+
+    monkeypatch.setattr(gui, "wifi_connect", fake_wifi_connect)
+    results = []
+    app._wifi_connect_bg("1.2.3.4:5555", "", "", lambda ok, msg: results.append((ok, msg)))
+    pump(root, 0.5)
+    assert results and results[0][0] is True
+    assert captured["adb"].serial is None
 
 
 def test_receipt_carries_shop_details(root, monkeypatch, tmp_path):

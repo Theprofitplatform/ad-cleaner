@@ -2634,6 +2634,7 @@ class AdCleanerApp:
         "block-notifications": "Stopped notifications",
         "debloat": "Disabled preinstalled app",
         "restrict-data": "Blocked background data",
+        "disable-accessibility": "Stopped screen control",
     }
 
     def _refresh_history(self):

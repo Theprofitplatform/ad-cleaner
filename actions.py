@@ -523,7 +523,8 @@ def undo(adb, entry, log):
         cur = (adb.shell_text(["settings", "get", "secure",
                                "enabled_accessibility_services"]) or "").strip()
         cur = "" if cur in ("", "null") else cur
-        value = ":".join(x for x in (cur, removed) if x)
+        parts = (cur.split(":") if cur else []) + (removed.split(":") if removed else [])
+        value = ":".join(dict.fromkeys(parts))
         cmd = ["settings", "put", "secure", "enabled_accessibility_services", value]
         adb.shell_text(cmd)
         adb.shell_text(["settings", "put", "secure", "accessibility_enabled", "1"])

@@ -79,6 +79,8 @@ class FakeAdb:
             return getattr(self, "role_holder", "")
         if args[:4] == ["settings", "get", "secure", "enabled_accessibility_services"]:
             return ""
+        if args[:3] == ["settings", "put", "secure"]:
+            return ""
         if args[:3] == ["settings", "get", "global"]:
             return self.globals.get(args[3], "null")
         if args[:3] == ["settings", "put", "global"]:
@@ -369,6 +371,23 @@ def test_data_btn_disabled_for_non_app_uid(root, monkeypatch, tmp_path):
     app.tree.selection_set("com.random.freegift"); app._on_select()
     pump(root, 0.1)
     assert str(app.data_btn["state"]) != "disabled"
+
+
+def test_stop_screen_control_button(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    spy = App(package="com.random.adware", installer=None, active_accessibility=True)
+    score_app(spy, NOW)
+    app.apps = [spy]; app._render_table()
+    app.tree.selection_set("com.random.adware"); app._on_select()
+    pump(root, 0.1)
+    assert str(app.a11y_btn["state"]) == "normal"
+    app.on_disable_a11y()
+    pump(root, 0.6)
+    assert spy.active_accessibility is False
+    assert any(c[:4] == ["settings", "put", "secure", "enabled_accessibility_services"]
+               for c in app.adb.calls)
 
 
 def test_screenshot_and_reboot(root, monkeypatch, tmp_path):

@@ -293,6 +293,18 @@ def test_disable_accessibility_last_one_sets_null(log):
     assert adb.a11y == "null"
 
 
+def test_disable_accessibility_is_undoable(log):
+    adb = FakeAdb()
+    adb.a11y = "com.evil.admin/.Spy:com.ok.app/.Helper"
+    disable_accessibility(adb, "com.evil.admin", log)
+    entry = log.recent()[0]
+    assert can_undo(entry)
+    assert entry["previous"] == "com.evil.admin/.Spy"
+    assert undo(adb, entry, log) is True
+    assert "com.evil.admin/.Spy" in adb.a11y and "com.ok.app/.Helper" in adb.a11y
+    assert ["settings", "put", "secure", "accessibility_enabled", "1"] in adb.calls
+
+
 def test_uninstall_neutralises_accessibility_first(log):
     adb = FakeAdb()
     adb.a11y = "com.evil.admin/.Svc"

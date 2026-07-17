@@ -17,7 +17,8 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, debloat, delete_file, fix_role, force_stop,
+    clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
+    fix_role, force_stop,
     pause, read_private_dns,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
@@ -483,9 +484,11 @@ class AdCleanerApp:
                                            self.on_block_notifs, AMBER, AMBER_HOT)
         self.data_btn = self._flat_button(btns, "📵  Block background data",
                                           self.on_restrict_data, AMBER, AMBER_HOT)
+        self.a11y_btn = self._flat_button(btns, "🖐  Stop screen control",
+                                          self.on_disable_a11y, RED, RED_HOT)
         self.detail_btns = (self.pause_btn, self.resume_btn, self.uninstall_btn,
                             self.reset_btn, self.backup_btn, self.fixrole_btn, self.notif_btn,
-                            self.data_btn)
+                            self.data_btn, self.a11y_btn)
         for b in self.detail_btns:
             b.pack(side="left", padx=(0, 8))
             self._enable_btn(b, False)
@@ -1348,6 +1351,7 @@ class AdCleanerApp:
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
         self._enable_btn(self.notif_btn, a.notif_count > 0)
         self._enable_btn(self.data_btn, a.uid >= 10000)
+        self._enable_btn(self.a11y_btn, a.active_accessibility)
 
     # --- Google Play check + app icons (best effort, display-only) -----------
 
@@ -1547,6 +1551,32 @@ class AdCleanerApp:
             self.status_line("Couldn't stop notifications. " + self._friendly(err), "error")
         else:
             self.status_line(f"✅ Notifications stopped for {label}", "good")
+
+    def on_disable_a11y(self):
+        a = self.selected
+        if not a or self.busy or not self.serial:
+            return
+        label = a.label.split(" (")[0]
+
+        def work():
+            try:
+                disable_accessibility(self.adb, a.package, self.log)
+                self._post(self._a11y_done, a, label, None)
+            except AdbError as e:
+                self._post(self._a11y_done, a, label, str(e))
+
+        self.busy = True
+        self._run_bg(work)
+
+    def _a11y_done(self, app, label, err):
+        self.busy = False
+        self._refresh_history()
+        if err:
+            self.status_line("Couldn't switch it off. " + self._friendly(err), "error")
+        else:
+            app.active_accessibility = False
+            self.status_line(f"✅ {label} can no longer control the screen.", "good")
+            self._update_detail()
 
     def on_restrict_data(self):
         a = self.selected

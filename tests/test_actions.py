@@ -28,6 +28,7 @@ class FakeAdb:
         self.calls = []
         self.commands = []
         self.globals = {}
+        self.gone_for_good = set()
 
     def pull(self, remote, local, timeout=120):
         self.pulled.append((remote, local))
@@ -62,12 +63,13 @@ class FakeAdb:
         if args[:3] == ["pm", "uninstall", "--user"]:
             pkg = args[-1]
             if pkg in self.admin_active:
-                from adb import AdbError
                 raise AdbError("Cannot delete active device admin")
             self.installed.discard(pkg); return "Success"
         if args[:2] == ["dpm", "remove-active-admin"]:
             self.admin_active.clear(); return "Success"
         if args[:3] == ["cmd", "package", "install-existing"]:
+            if args[-1] in self.gone_for_good:
+                raise AdbError(f"Package {args[-1]} doesn't exist")
             self.installed.add(args[-1]); return "installed"
         if args[:2] == ["am", "force-stop"]:
             return ""
@@ -81,6 +83,14 @@ class FakeAdb:
             return self.globals.get(args[3], "null")
         if args[:3] == ["settings", "put", "global"]:
             self.globals[args[3]] = args[4]; return ""
+        return ""
+
+    def run(self, args, timeout=120):
+        self.calls.append(list(args))
+        self.commands.append(" ".join(args))
+        if args and args[0] in ("install", "install-multiple"):
+            self.installed.add("com.random.adware")
+            return "Success"
         return ""
 
 
@@ -301,6 +311,48 @@ def test_reset_app_data_protected_raises(log):
     adb = FakeAdb()
     with pytest.raises(ProtectedAppError):
         reset_app_data(adb, PROTECTED, log)
+
+
+def test_uninstall_backs_up_apk_first(log, tmp_path, monkeypatch):
+    monkeypatch.setattr(actions, "data_dir", lambda: tmp_path)
+    adb = FakeAdb()
+    app = App(package="com.random.adware", installer=None)
+    assert uninstall(adb, app, log) is True
+    entry = log.recent()[0]
+    assert entry["apk"] == [str(tmp_path / "apk_backups" / "TEST" / "com.random.adware.apk")]
+    assert Path(entry["apk"][0]).exists()
+
+
+def test_undo_uninstall_prefers_install_existing(log, tmp_path, monkeypatch):
+    monkeypatch.setattr(actions, "data_dir", lambda: tmp_path)
+    adb = FakeAdb()
+    app = App(package="com.random.adware", installer=None)
+    uninstall(adb, app, log)
+    assert undo(adb, log.recent()[0], log) is True
+    assert "com.random.adware" in adb.installed
+    assert not any(c and c[0] == "install" for c in adb.calls)
+
+
+def test_undo_uninstall_falls_back_to_saved_apk(log, tmp_path, monkeypatch):
+    monkeypatch.setattr(actions, "data_dir", lambda: tmp_path)
+    adb = FakeAdb()
+    adb.gone_for_good = {"com.random.adware"}     # install-existing will fail
+    app = App(package="com.random.adware", installer=None)
+    uninstall(adb, app, log)
+    assert undo(adb, log.recent()[0], log) is True
+    apk = str(tmp_path / "apk_backups" / "TEST" / "com.random.adware.apk")
+    assert ["install", "-r", apk] in adb.calls
+
+
+def test_undo_uninstall_no_backup_no_apk_raises(log, tmp_path, monkeypatch):
+    monkeypatch.setattr(actions, "data_dir", lambda: tmp_path)
+    adb = FakeAdb()
+    adb.gone_for_good = {"com.random.adware"}
+    app = App(package="com.random.adware", installer=None)
+    uninstall(adb, app, log)
+    entry = dict(log.recent()[0], apk=[])          # simulate a failed backup
+    with pytest.raises(AdbError):
+        undo(adb, entry, log)
 
 
 def test_backup_apk_pulls_to_dest(tmp_path):

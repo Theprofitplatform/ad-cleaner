@@ -105,6 +105,10 @@ class FakeAdb:
             return ""
         return ""
 
+    def run(self, args, timeout=10):
+        self.calls.append(list(args))
+        return "connected to 1.2.3.4:5555" if args[0] == "connect" else ""
+
 
 class NoDeviceAdb(FakeAdb):
     devices_list = []
@@ -728,6 +732,17 @@ def test_owner_row_warns_on_managed_phone(root, monkeypatch, tmp_path):
     assert "com.mdm.corp" in app.dev_vars["owner"].get()
     app._show_owners({"device": None, "profile": None})
     assert "not a managed" in app.dev_vars["owner"].get()
+
+
+def test_wifi_connect_worker(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    results = []
+    app._wifi_connect_bg("1.2.3.4:5555", "", "", lambda ok, msg: results.append((ok, msg)))
+    pump(root, 0.5)
+    assert results and results[0][0] is True
+    assert ["connect", "1.2.3.4:5555"] in app.adb.calls
 
 
 def test_receipt_carries_shop_details(root, monkeypatch, tmp_path):

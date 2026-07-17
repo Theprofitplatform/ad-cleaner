@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from adb import Adb, AdbError, data_dir, find_adb
+from adb import Adb, AdbError, data_dir, find_adb, wifi_connect
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
@@ -934,6 +934,13 @@ class AdCleanerApp:
                     self.wizard, text=BRAND_STEPS["Other / not sure"], wraplength=900,
                     justify="left", style="PanelMuted.TLabel")
                 self.brand_help.pack(anchor="w", padx=36, pady=(3, 6))
+        wifi_row = ttk.Frame(self.wizard, style="PanelFlat.TFrame")
+        wifi_row.pack(fill="x", pady=(10, 0))
+        ttk.Label(wifi_row, text="Broken charging port or no cable?",
+                  style="PanelMuted.TLabel").pack(side="left", padx=(0, 8))
+        self.wifi_btn = self._flat_button(wifi_row, "📶  Connect over Wi-Fi…",
+                                          self.on_wifi_connect, SLATE, SLATE_HOT)
+        self.wifi_btn.pack(side="left")
         self._set_wizard_state("searching")
 
     def _show_brand(self):
@@ -1043,6 +1050,64 @@ class AdCleanerApp:
         except Exception:
             pass
         self._post(self._poll_devices)
+
+    def _wifi_connect_bg(self, conn, pair, code, on_done):
+        """Run wifi_connect off the UI thread; on_done(ok, message) on the UI
+        thread. Split from the dialog so tests can drive it headlessly."""
+        def work():
+            ok, msg = wifi_connect(self.adb, conn, pair, code)
+            self._post(on_done, ok, msg)
+        self._run_bg(work)
+
+    def on_wifi_connect(self):
+        if not self.adb:
+            return
+        win = tk.Toplevel(self.root)
+        win.title("Connect over Wi-Fi")
+        win.configure(bg=BASE)
+        win.transient(self.root)
+        win.grab_set()
+        ttk.Label(win, justify="left", wraplength=470, text=(
+            "The phone and this PC must be on the same Wi-Fi network.\n\n"
+            "On the phone: Settings → Developer options → Wireless debugging → ON.\n"
+            "1.  Tap “Pair device with pairing code” — type the code and the\n"
+            "     pairing address it shows (first time only).\n"
+            "2.  The main Wireless debugging screen shows the connect address\n"
+            "     (IP address & Port).")).grid(row=0, column=0, columnspan=2,
+                                               padx=14, pady=(12, 10), sticky="w")
+        pair_v, code_v, conn_v = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        fields = (("Pairing address (IP:port)", pair_v),
+                  ("Pairing code (6 digits)", code_v),
+                  ("Connect address (IP:port)", conn_v))
+        for r, (lbl, var) in enumerate(fields, start=1):
+            ttk.Label(win, text=lbl).grid(row=r, column=0, sticky="e",
+                                          padx=(14, 8), pady=4)
+            ttk.Entry(win, textvariable=var, width=24).grid(
+                row=r, column=1, sticky="w", padx=(0, 14), pady=4)
+        status = ttk.Label(win, text="", wraplength=470, justify="left")
+        status.grid(row=4, column=0, columnspan=2, padx=14, pady=(6, 0), sticky="w")
+
+        def done(ok, msg):
+            if not win.winfo_exists():
+                return
+            if ok:
+                win.destroy()
+                self.status_line("✅ Connected over Wi-Fi — the phone will appear "
+                                 "in a moment.", "good")
+            else:
+                status.config(text="Couldn't connect: " + msg)
+
+        def go():
+            conn = conn_v.get().strip()
+            if not conn:
+                status.config(text="Enter the connect address — it looks like "
+                                   "192.168.1.23:37099.")
+                return
+            status.config(text="Connecting…")
+            self._wifi_connect_bg(conn, pair_v.get().strip(), code_v.get().strip(), done)
+
+        self._flat_button(win, "📶  Connect", go, GREEN, GREEN_HOT).grid(
+            row=5, column=0, columnspan=2, pady=(10, 14))
 
     def _poll_devices(self):
         if not self.alive or not self.adb:

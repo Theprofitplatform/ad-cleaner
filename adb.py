@@ -128,6 +128,28 @@ class Adb:
         return self.run(["reboot"], timeout=timeout)
 
 
+def wifi_connect(adb, connect_hostport, pair_hostport="", code=""):
+    """Pair (first time) then connect to a phone over Wi-Fi — Android 11+
+    'Wireless debugging'. Returns (ok, message). `adb connect` exits 0 even
+    when it fails, so success is judged from the output text, not the exit
+    code. Once connected the phone shows up in `adb devices` with an
+    ip:port serial and the normal poll takes over."""
+    if pair_hostport and code:
+        try:
+            out = adb.run(["pair", pair_hostport, code], timeout=30)
+        except AdbError as e:
+            return False, str(e)
+        if "paired" not in out.lower() or "failed" in out.lower():
+            return False, out.strip() or "Pairing failed — check the code and address."
+    try:
+        out = adb.run(["connect", connect_hostport], timeout=30)
+    except AdbError as e:
+        return False, str(e)
+    low = out.lower()
+    ok = "connected to" in low and "failed" not in low and "cannot" not in low
+    return ok, out.strip()
+
+
 def parse_devices(output):
     devices = []
     for line in output.splitlines():
@@ -172,6 +194,13 @@ def demo():
     assert devs[0] == {"serial": "R58N12ABCDE", "state": "device", "model": "SM G991B"}, devs
     assert devs[1]["state"] == "unauthorized"
     assert "not authorized" in _friendly("error: device unauthorized").lower()
+
+    class _F:
+        def run(self, args, timeout=10):
+            return {"pair": "Successfully paired to h [guid]",
+                    "connect": "connected to 1.2.3.4:5555"}[args[0]]
+    ok, _ = wifi_connect(_F(), "1.2.3.4:5555", "1.2.3.4:4444", "123456")
+    assert ok
     print("adb.py demo OK")
 
 

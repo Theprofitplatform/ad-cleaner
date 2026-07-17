@@ -36,3 +36,53 @@ def test_find_adb_prefers_bundled_meipass(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     found = adb.find_adb(base=tmp_path / "nonexistent")
     assert found == str(bundle / "adb.exe")
+
+
+from adb import wifi_connect
+
+
+class WifiFake:
+    def __init__(self, pair_out="Successfully paired to 192.168.1.9:41567 [guid=x]",
+                 connect_out="connected to 192.168.1.9:37099"):
+        self.calls = []
+        self.pair_out, self.connect_out = pair_out, connect_out
+
+    def run(self, args, timeout=10):
+        self.calls.append(list(args))
+        if args[0] == "pair":
+            return self.pair_out
+        if args[0] == "connect":
+            return self.connect_out
+        return ""
+
+
+def test_wifi_connect_pairs_then_connects():
+    fake = WifiFake()
+    ok, msg = wifi_connect(fake, "192.168.1.9:37099", "192.168.1.9:41567", "123456")
+    assert ok and "connected" in msg
+    assert fake.calls[0] == ["pair", "192.168.1.9:41567", "123456"]
+    assert fake.calls[1] == ["connect", "192.168.1.9:37099"]
+
+
+def test_wifi_connect_skips_pairing_when_blank():
+    fake = WifiFake()
+    ok, _ = wifi_connect(fake, "192.168.1.9:37099")
+    assert ok and fake.calls == [["connect", "192.168.1.9:37099"]]
+
+
+def test_wifi_connect_reports_connect_failure():
+    fake = WifiFake(connect_out="failed to connect to 192.168.1.9:37099")
+    ok, msg = wifi_connect(fake, "192.168.1.9:37099")
+    assert not ok and "failed" in msg
+
+
+def test_wifi_connect_reports_pair_failure():
+    fake = WifiFake(pair_out="Failed: Wrong password or connection was dropped")
+    ok, msg = wifi_connect(fake, "192.168.1.9:37099", "192.168.1.9:41567", "000000")
+    assert not ok and len(fake.calls) == 1   # never tries to connect
+
+
+def test_wifi_connect_already_connected_is_ok():
+    fake = WifiFake(connect_out="already connected to 192.168.1.9:37099")
+    ok, _ = wifi_connect(fake, "192.168.1.9:37099")
+    assert ok

@@ -728,3 +728,14 @@ def test_owner_row_warns_on_managed_phone(root, monkeypatch, tmp_path):
     assert "com.mdm.corp" in app.dev_vars["owner"].get()
     app._show_owners({"device": None, "profile": None})
     assert "not a managed" in app.dev_vars["owner"].get()
+
+
+def test_receipt_carries_shop_details(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app._settings["shop_name"] = "Fix It Bros"
+    path = app._save_receipt({"stopped": 1, "acted": 0, "removed": False,
+                            "popups_blocked": 0, "packages": [], "dns": "Off",
+                            "freed_gb": 0})
+    assert path and "Fix It Bros" in path.read_text(encoding="utf-8")

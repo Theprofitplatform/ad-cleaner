@@ -42,3 +42,13 @@ def test_intake_shows_managed_phone():
     out = report.render_intake_html({"app_count": 0, "managed": "com.mdm.corp (device owner)"})
     assert "Managed by" in out and "com.mdm.corp (device owner)" in out
     assert "Managed by" not in report.render_intake_html({"app_count": 0})
+
+
+def test_shop_header_on_receipt_and_intake():
+    r = {"when": "t", "stopped": 1, "acted": 0,
+         "shop_name": "Phone Fix <Bros>", "shop_contact": "07 5555 5555 · fix.example"}
+    out = report.render_receipt_html(r)
+    assert "Phone Fix &lt;Bros&gt;" in out and "07 5555 5555" in out
+    intake = report.render_intake_html({"app_count": 0, "shop_name": "Phone Fix <Bros>"})
+    assert "Phone Fix &lt;Bros&gt;" in intake
+    assert "Phone Fix" not in report.render_receipt_html({"when": "t"})

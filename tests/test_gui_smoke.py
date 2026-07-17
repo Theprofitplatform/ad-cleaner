@@ -99,6 +99,8 @@ class FakeAdb:
             return fx("batterystats.txt")
         if args == ["pm", "list", "packages", "-U", "-3"]:
             return fx("packages_uids.txt")
+        if args[:2] == ["rm", "-f"]:
+            return ""
         return ""
 
 
@@ -685,3 +687,15 @@ def test_resource_hogs_error_reenables_button(root, monkeypatch, tmp_path):
     pump(root, 1.0)
     assert str(app.res_btn["state"]) == "normal"
     assert not hasattr(app, "res_win") or not app.res_win.winfo_exists()
+
+
+def test_big_files_window_deletes_selected(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app._show_big_files([("/storage/emulated/0/Movies/big.mp4", 500)])
+    app.bigfiles_tree.selection_set("/storage/emulated/0/Movies/big.mp4")
+    app._delete_big_files(app.bigfiles_tree.master, app.bigfiles_tree)
+    pump(root, 0.5)
+    assert any(c[:2] == ["rm", "-f"] for c in app.adb.calls)
+    assert not app.bigfiles_tree.exists("/storage/emulated/0/Movies/big.mp4")

@@ -6,7 +6,7 @@ import actions
 import playstore
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, disable_accessibility, fix_role,
+    clean_risky, clear_caches, clear_private_dns, delete_file, disable_accessibility, fix_role,
     force_stop, pause,
     read_private_dns, reboot, reset_app_data, restrict_background, resume, set_private_dns,
     stop_all, undo, uninstall, will_clean,
@@ -83,6 +83,8 @@ class FakeAdb:
             return self.globals.get(args[3], "null")
         if args[:3] == ["settings", "put", "global"]:
             self.globals[args[3]] = args[4]; return ""
+        if args[:2] == ["rm", "-f"]:
+            return ""
         return ""
 
     def run(self, args, timeout=120):
@@ -498,3 +500,23 @@ def test_restrict_background_refuses_non_app_uid(log):
     with pytest.raises(ProtectedAppError):
         restrict_background(adb, "com.x", 0, log)
     assert not any("netpolicy" in c for c in adb.commands)
+
+
+def test_delete_file_removes_shared_storage_file(log):
+    adb = FakeAdb()
+    assert actions.delete_file(adb, "/storage/emulated/0/Movies/big file.mp4", log) is True
+    assert ["rm", "-f", "--", "'/storage/emulated/0/Movies/big file.mp4'"] in adb.calls
+    entry = log.recent()[0]
+    assert entry["action"] == "delete-file" and not can_undo(entry)
+
+
+@pytest.mark.parametrize("path", [
+    "/data/app/com.foo/base.apk",              # not shared storage
+    "/storage/emulated/0/../data/secret",      # traversal
+    "relative/path.mp4",                       # not absolute
+])
+def test_delete_file_refuses_unsafe_paths(log, path):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        actions.delete_file(adb, path, log)
+    assert not any(c and c[0] == "rm" for c in adb.calls)

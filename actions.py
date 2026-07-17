@@ -6,6 +6,7 @@ re-querying device state -> append to the append-only undo log.
 
 import json
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 
@@ -387,6 +388,25 @@ def clear_caches(adb, log=None):
     if log is not None:
         log.append(adb.serial, "(all apps)", "clear-cache", "-",
                    ["pm", "trim-caches"], "ok")
+    return True
+
+
+_SHARED_PREFIXES = ("/storage/emulated/0/", "/sdcard/")
+
+
+def delete_file(adb, path, log):
+    """Permanently delete ONE file on shared storage (big-file cleanup).
+
+    NOT undoable, so the guard is hard: shared-storage prefix only, no
+    traversal. shlex.quote survives the round trip through `adb shell`'s
+    re-parsing, so spaces/parens in filenames can't split into extra args.
+    A directory or an undeletable file makes rm exit nonzero -> AdbError.
+    """
+    if ".." in path or not path.startswith(_SHARED_PREFIXES):
+        raise ProtectedAppError(f"refusing to delete {path!r} — not shared storage")
+    cmd = ["rm", "-f", "--", shlex.quote(path)]
+    adb.shell_text(cmd)
+    log.append(adb.serial, "(file)", "delete-file", path, cmd, "ok")
     return True
 
 

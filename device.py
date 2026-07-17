@@ -230,6 +230,32 @@ def read_device_stats(adb):
     }
 
 
+def parse_big_files(text):
+    """`du -m` lines ('123<TAB>/path with spaces') -> [(path, mb)] biggest
+    first. Error lines and anything not size-then-absolute-path are skipped."""
+    rows = []
+    for line in (text or "").splitlines():
+        m = re.match(r"^(\d+)\s+(/.+)$", line.rstrip())
+        if m:
+            rows.append((m.group(2), int(m.group(1))))
+    return sorted(rows, key=lambda r: -r[1])
+
+
+def read_big_files(adb, min_mb=100):
+    """Biggest files on shared storage (photos, videos, downloads live here).
+    App-private dirs under Android/ are invisible to the shell on Android 11+
+    and make `find` exit nonzero; 2>/dev/null + `|| true` keep that noise from
+    failing the whole run (adb shell passes these through to the phone's sh)."""
+    try:
+        out = adb.shell_text(
+            ["find", "/storage/emulated/0", "-type", "f", "-size", f"+{min_mb}M",
+             "-exec", "du", "-m", "{}", "+", "2>/dev/null", "||", "true"],
+            timeout=120)
+    except Exception:
+        return []
+    return parse_big_files(out)
+
+
 def demo():
     mem = "MemTotal:        3906120 kB\nMemFree: 100 kB\nMemAvailable:    1953060 kB\n"
     total, avail = parse_meminfo(mem)
@@ -280,6 +306,9 @@ def demo():
     assert rows == [("com.a", 10, 1, 5), ("com.b", 20, 2, 6)]
     assert (free, total) == (100 * 1024, 200 * 1024)
     assert parse_diskstats("Package Names: [\"com.a\"]\nApp Sizes: [1, 2]\n") == ([], 0, 0)
+
+    big = parse_big_files("512\t/storage/emulated/0/a b.mp4\ndu: x: denied\n")
+    assert big == [("/storage/emulated/0/a b.mp4", 512)]
     print("device.py demo OK")
 
 

@@ -148,3 +148,16 @@ def test_read_resource_report():
     assert r["disk_total"] > 0
     pkg, tot, data, cache = r["storage"][0]
     assert tot >= data + cache and tot > r["storage"][-1][1]
+
+
+def test_parse_big_files():
+    out = ("512\t/storage/emulated/0/Movies/holiday video (1).mp4\n"
+           "du: /storage/emulated/0/Android/data: Permission denied\n"
+           "1300\t/storage/emulated/0/Download/game.apk\n"
+           "garbage line\n")
+    assert device.parse_big_files(out) == [
+        ("/storage/emulated/0/Download/game.apk", 1300),
+        ("/storage/emulated/0/Movies/holiday video (1).mp4", 512),
+    ]
+    assert device.parse_big_files("") == []
+    assert device.parse_big_files(None) == []

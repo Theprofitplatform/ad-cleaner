@@ -47,7 +47,8 @@ class ActionLog:
     def _save(self):
         self.path.write_text(json.dumps(self.entries, indent=2), encoding="utf-8")
 
-    def append(self, serial, package, action, previous, command, result, apk=None):
+    def append(self, serial, package, action, previous, command, result, apk=None,
+               backup=None):
         entry = {
             "time": datetime.now().isoformat(timespec="seconds"),
             "serial": serial,
@@ -59,6 +60,8 @@ class ActionLog:
         }
         if apk:
             entry["apk"] = apk
+        if backup:
+            entry["backup"] = backup
         self.entries.append(entry)
         self._save()
         return entry
@@ -417,19 +420,32 @@ def clear_caches(adb, log=None):
 _SHARED_PREFIXES = ("/storage/emulated/0/", "/sdcard/")
 
 
-def delete_file(adb, path, log):
-    """Permanently delete ONE file on shared storage (big-file cleanup).
+BACKUP_CAP_MB = 2048   # ponytail: pulling >2 GB stalls the UI queue; those stay permanent
 
-    NOT undoable, so the guard is hard: shared-storage prefix only, no
-    traversal. shlex.quote survives the round trip through `adb shell`'s
-    re-parsing, so spaces/parens in filenames can't split into extra args.
-    A directory or an undeletable file makes rm exit nonzero -> AdbError.
+
+def delete_file(adb, path, log, backup_dir=None):
+    """Delete ONE file on shared storage (big-file cleanup).
+
+    With `backup_dir` the file is pulled to this PC first, so the deletion is
+    undoable from History (undo pushes the copy back to the phone). Without it
+    the delete is permanent (the caller's choice for oversized files).
+    The guard is hard either way: shared-storage prefix only, no traversal.
+    shlex.quote survives the round trip through `adb shell`'s re-parsing, so
+    spaces/parens in filenames can't split into extra args. A directory or an
+    undeletable file makes rm exit nonzero -> AdbError.
     """
     if ".." in path or not path.startswith(_SHARED_PREFIXES):
         raise ProtectedAppError(f"refusing to delete {path!r} — not shared storage")
+    backup = None
+    if backup_dir:
+        dest = Path(backup_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        local = dest / (datetime.now().strftime("%Y%m%d-%H%M%S ") + Path(path).name)
+        adb.pull(path, str(local), timeout=600)
+        backup = str(local)
     cmd = ["rm", "-f", "--", shlex.quote(path)]
     adb.shell_text(cmd)
-    log.append(adb.serial, "(file)", "delete-file", path, cmd, "ok")
+    log.append(adb.serial, "(file)", "delete-file", path, cmd, "ok", backup=backup)
     return True
 
 
@@ -488,6 +504,10 @@ def clear_private_dns(adb, log):
 # --- Undo -------------------------------------------------------------------
 
 def can_undo(entry):
+    if entry.get("action") == "delete-file":
+        # Undoable only while the PC-side copy still exists.
+        backup = entry.get("backup") or ""
+        return bool(backup) and Path(backup).exists()
     return entry.get("action") in UNDOABLE
 
 
@@ -536,6 +556,13 @@ def undo(adb, entry, log):
         else:
             cmd = ["pm", "grant", pkg, "android.permission.POST_NOTIFICATIONS"]
         adb.shell_text(cmd)
+    elif action == "delete-file":
+        local = entry.get("backup") or ""
+        if not Path(local).exists():
+            raise AdbError("No saved copy of this file exists on this PC, "
+                           "so it can't be restored.")
+        cmd = ["push", local, entry["previous"]]
+        adb.push(local, entry["previous"], timeout=600)
     elif action == "restrict-data":
         cmd = ["cmd", "netpolicy", "remove", "restrict-background-blacklist", entry["previous"]]
         adb.shell_text(cmd)

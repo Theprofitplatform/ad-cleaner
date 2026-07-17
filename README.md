@@ -56,10 +56,12 @@ connect wizard instead:
 
 1. Make sure the **phone and this PC are on the same Wi-Fi network**.
 2. On the phone: **Developer options → Wireless debugging** → turn it on.
-3. The first time, tap **"Pair device with pairing code"** and enter the code
-   and pairing address it shows into the wizard.
-4. Then enter the **connect address** (also shown on that screen) and click
-   **Connect**.
+3. The wizard **looks for the phone on your network and fills the addresses in
+   for you** when it can (press **🔍 Find my phone** to look again). If it
+   can't, type them from the phone's Wireless debugging screen.
+4. The first time, tap **"Pair device with pairing code"** on the phone and
+   enter the 6-digit code into the wizard.
+5. Click **Connect**.
 
 ## If pop-up ads are covering the screen
 
@@ -91,7 +93,7 @@ individual apps), then restart the phone normally.
 | **💤 Disable preinstalled junk** | On the Device tab. Switches off known carrier/maker bloat (never uninstalls, so it can't brick the phone; reversible from History). |
 | **📵 Block background data** | In an app's detail panel. Stops an app using mobile data in the background. Reversible. |
 | **🛡️ Block ads (Private DNS)** | On the Device tab. Sends the phone's DNS through an ad-blocking resolver so ads are blocked in **every** app, even ones you keep. Reversible with **Turn off**. |
-| **🗂 Find big files** | On the Device tab. Lists the biggest files on the phone's shared storage (old videos, downloads) so you can delete the ones you don't need. **Deleting a file here is permanent** — it does not go to a recycle bin. |
+| **🗂 Find big files** | On the Device tab. Lists the biggest files on the phone's shared storage (old videos, downloads) so you can delete the ones you don't need. Deleted files are **copied to this PC first** so you can undo from History; files over 2 GB are too big to copy and are deleted permanently. |
 | **🖐 Stop screen control** | In an app's detail panel. Switches off an app's ability to control the screen (its "accessibility" access) — useful for apps that block taps or won't let you uninstall them. Reversible from History. |
 | **📲 Smart Switch (transfer data)** | On the Device tab. Opens Samsung's Smart Switch on the phone so you can send apps, texts and more to a new phone, cable-to-cable. |
 | **🏪 Shop details…** | On the History tab. Enter your shop's name and contact details once and they'll print at the top of every receipt and condition report. |
@@ -122,8 +124,10 @@ re-install something you removed) — this works even for apps that were
 **sideloaded** (installed outside the Play Store), because Ad Cleaner saves a
 copy of the app (`adcleaner_data/apk_backups/`) before removing it.
 
-Files deleted with **🗂 Find big files** are the one exception — that deletion
-is **permanent** and can't be undone from History.
+Files deleted with **🗂 Find big files** are copied to this PC
+(`adcleaner_data/file_backups/`) before deletion, so those can be undone too —
+except files **over 2 GB**, which are too big to copy and are deleted
+permanently.
 
 After a clean, Ad Cleaner saves a **printable receipt** (in `adcleaner_data/reports/`)
 listing what it closed, blocked and removed — handy when cleaning someone else's

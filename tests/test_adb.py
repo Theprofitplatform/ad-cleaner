@@ -94,3 +94,37 @@ def test_wifi_connect_already_connected_is_ok():
     fake = WifiFake(connect_out="already connected to 192.168.1.9:37099")
     ok, _ = wifi_connect(fake, "192.168.1.9:37099")
     assert ok
+
+
+from adb import AdbError, mdns_discover, parse_mdns_services
+
+
+def test_parse_mdns_services_classifies_connect_and_pairing():
+    out = ("List of discovered mdns services\n"
+           "adb-R58N1-QhSlvJ\t_adb-tls-connect._tcp\t192.168.1.9:37099\n"
+           "adb-R58N1-QhSlvJ\t_adb-tls-pairing._tcp\t192.168.1.9:41234\n")
+    assert parse_mdns_services(out) == {"connect": ["192.168.1.9:37099"],
+                                        "pairing": ["192.168.1.9:41234"]}
+
+
+def test_parse_mdns_services_tolerates_variants_and_dedupes():
+    out = ("adb-x\t_adb-tls-connect._tcp.\t192.168.1.9:37099\n"     # trailing dot
+           "adb-x\t_adb._tcp.\t192.168.1.9:5555\n"                  # plain adbd tcpip
+           "adb-x\t_adb-tls-connect._tcp\t192.168.1.9:37099\n"      # duplicate
+           "garbage line with no address\n")
+    got = parse_mdns_services(out)
+    assert got["connect"] == ["192.168.1.9:37099", "192.168.1.9:5555"]
+    assert got["pairing"] == []
+
+
+def test_parse_mdns_services_empty():
+    assert parse_mdns_services("") == {"connect": [], "pairing": []}
+    assert parse_mdns_services("List of discovered mdns services\n") == \
+        {"connect": [], "pairing": []}
+
+
+def test_mdns_discover_swallows_adb_errors():
+    class Broken:
+        def run(self, args, timeout=10):
+            raise AdbError("mdns not supported")
+    assert mdns_discover(Broken()) == {"connect": [], "pairing": []}

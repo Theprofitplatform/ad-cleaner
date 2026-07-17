@@ -24,6 +24,7 @@ class FakeAdb:
         self.admin_active = {"com.evil.admin"} if admin_blocks else set()
         self.a11y = ""
         self.pulled = []
+        self.pushed = []
         self.rebooted = False
         self.calls = []
         self.commands = []
@@ -34,6 +35,10 @@ class FakeAdb:
         self.pulled.append((remote, local))
         Path(local).write_text("apk")
         return "pulled"
+
+    def push(self, local, remote, timeout=120):
+        self.pushed.append((local, remote))
+        return "pushed"
 
     def reboot(self, timeout=10):
         self.rebooted = True
@@ -564,3 +569,32 @@ def test_delete_file_refuses_unsafe_paths(log, path):
     with pytest.raises(ProtectedAppError):
         actions.delete_file(adb, path, log)
     assert not any(c and c[0] == "rm" for c in adb.calls)
+
+
+def test_delete_file_with_backup_is_undoable(log, tmp_path):
+    adb = FakeAdb()
+    actions.delete_file(adb, "/sdcard/Movies/big vid.mp4", log, backup_dir=tmp_path)
+    assert adb.pulled and adb.pulled[0][0] == "/sdcard/Movies/big vid.mp4"
+    entry = log.recent()[0]
+    assert entry["backup"].endswith("big vid.mp4") and can_undo(entry)
+    undo(adb, entry, log)
+    assert adb.pushed == [(entry["backup"], "/sdcard/Movies/big vid.mp4")]
+    assert log.recent()[0]["action"] == "undo:delete-file"
+
+
+def test_delete_file_undo_refuses_when_backup_gone(log, tmp_path):
+    adb = FakeAdb()
+    actions.delete_file(adb, "/sdcard/old.bin", log, backup_dir=tmp_path)
+    entry = log.recent()[0]
+    Path(entry["backup"]).unlink()
+    assert not can_undo(entry)
+    with pytest.raises(AdbError):
+        undo(adb, entry, log)
+    assert not adb.pushed
+
+
+def test_delete_file_unsafe_path_never_pulled(log, tmp_path):
+    adb = FakeAdb()
+    with pytest.raises(ProtectedAppError):
+        actions.delete_file(adb, "/data/app/base.apk", log, backup_dir=tmp_path)
+    assert not adb.pulled

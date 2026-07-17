@@ -10,6 +10,7 @@ The starter set curated in stalkerware.py (well-known trade names such as
 com.thetruthspy) is unioned in rather than replaced: Echap's own literal
 package field for a family doesn't always match the family's public name.
 """
+import datetime
 import re
 import urllib.request
 from pathlib import Path
@@ -48,5 +49,7 @@ body = "\n".join(
 )
 new_set = "STALKERWARE = frozenset({\n" + body + "\n})"
 updated = re.sub(r"STALKERWARE = frozenset\(\{.*?\}\)", new_set, current, flags=re.DOTALL)
+updated = re.sub(r'UPDATED = "[0-9-]*"',
+                 f'UPDATED = "{datetime.date.today().isoformat()}"', updated)
 TARGET.write_text(updated, encoding="utf-8")
 print(f"wrote {TARGET}")

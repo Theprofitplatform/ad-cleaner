@@ -19,6 +19,10 @@ powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://github.com/Genym
 :havescrcpy
 
 echo.
+echo Refreshing the stalkerware detection list (skipped if offline)...
+python scripts\update_stalkerware.py || echo   (offline or fetch failed - keeping the bundled list)
+
+echo.
 echo Building AdCleaner.exe ...
 pyinstaller --onefile --windowed --name AdCleaner --add-data "platform-tools;platform-tools" --add-data "scrcpy;scrcpy" main.py || goto :error
 

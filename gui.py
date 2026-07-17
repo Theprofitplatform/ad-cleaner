@@ -7,6 +7,8 @@ freezes and never crashes on an ADB failure -- errors land in the status bar.
 
 import json
 import queue
+import re
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -14,9 +16,10 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from adb import Adb, AdbError, data_dir, find_adb, wifi_connect
+from adb import Adb, AdbError, data_dir, find_adb, mdns_discover, wifi_connect
 from actions import (
-    ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
+    ActionLog, BACKUP_CAP_MB, DNS_PROVIDERS, ProtectedAppError, backup_apk,
+    block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
     fix_role, force_stop,
     launch_smart_switch, pause, read_private_dns,
@@ -30,6 +33,7 @@ from device import (GB, read_battery_report, read_big_files, read_charging, read
 from report import render_history_html, render_intake_html, render_receipt_html
 from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory, parse_owners
 from setup_helper import download_platform_tools
+from stalkerware import UPDATED as STALKER_UPDATED
 
 import appicon
 import mirror
@@ -38,7 +42,18 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
+
+# Startup update check (packaged exe only; silent when offline).
+RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
+RELEASES_PAGE = "https://github.com/Theprofitplatform/ad-cleaner/releases/latest"
+
+
+def update_available(latest_tag, current=APP_VERSION):
+    """True when latest_tag (e.g. 'v1.5.0') is newer than the running version."""
+    def nums(s):
+        return tuple(int(n) for n in re.findall(r"\d+", s or "")[:3])
+    return bool(nums(latest_tag)) and nums(latest_tag) > nums(current)
 
 # --- palette ---------------------------------------------------------------
 FONT = "Segoe UI"
@@ -107,6 +122,12 @@ TROUBLESHOOTING
     a different USB port, and make sure USB debugging is on.
   * Samsung phones - installing "Samsung USB drivers" on this PC can help.
     Any brand - a "universal ADB driver" also works.
+""" + f"""
+ABOUT THE SCAN DATA
+
+Stalkerware (hidden tracking apps) are matched against the Echap
+stalkerware-indicators list, dated {STALKER_UPDATED} (CC-BY).
+Newer versions of Ad Cleaner ship a newer list.
 """
 
 
@@ -210,12 +231,35 @@ class AdCleanerApp:
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._pump_queue()
         self._locate_adb()
+        if getattr(sys, "frozen", False):   # packaged exe only — keeps tests offline
+            self._check_update()
 
     # --- cross-thread plumbing ---------------------------------------------
 
     def _post(self, fn, *args):
         """Called from worker threads; runs fn(*args) on the main thread."""
         self.ui_queue.put((fn, args))
+
+    def _check_update(self):
+        """Ask GitHub for the newest release; on a hit, show a clickable banner.
+        Silent on any failure — the app must keep working fully offline."""
+        def work():
+            try:
+                import urllib.request
+                with urllib.request.urlopen(RELEASES_API, timeout=6) as r:
+                    tag = json.load(r).get("tag_name", "")
+            except Exception:
+                return
+            if update_available(tag):
+                self._post(self._show_update, tag.lstrip("v"))
+        self._run_bg(work)
+
+    def _show_update(self, ver):
+        lbl = tk.Label(self.header, text=f"⬆  Version {ver} is out — click to download",
+                       bg=HEADER_BG, fg="#fbbf24", cursor="hand2",
+                       font=(FONT, 10, "underline"))
+        lbl.grid(row=0, column=4, sticky="e", padx=8)
+        lbl.bind("<Button-1>", lambda e: webbrowser.open(RELEASES_PAGE))
 
     def _pump_queue(self):
         if not self.alive:
@@ -326,6 +370,7 @@ class AdCleanerApp:
 
         header = ttk.Frame(self.root, style="Header.TFrame", padding=(14, 10))
         header.pack(fill="x")
+        self.header = header
         ttk.Label(header, text="🧹  Ad Cleaner", style="Header.TLabel",
                   font=(FONT, 13, "bold")).grid(row=0, column=0, padx=(0, 18))
         self.dot = tk.Canvas(header, width=18, height=18, highlightthickness=0, bg=HEADER_BG)
@@ -1116,8 +1161,38 @@ class AdCleanerApp:
             status.config(text="Connecting…")
             self._wifi_connect_bg(conn, pair_v.get().strip(), code_v.get().strip(), done)
 
+        def fill(found):
+            if not win.winfo_exists() or busy["v"]:
+                return
+            hit = False
+            if found["pairing"] and not pair_v.get().strip():
+                pair_v.set(found["pairing"][0])
+                hit = True
+            if found["connect"] and not conn_v.get().strip():
+                conn_v.set(found["connect"][0])
+                hit = True
+            if hit:
+                status.config(text="✅ Found your phone on the network — address "
+                                   "filled in for you. Add the pairing code if "
+                                   "this is the first time.")
+            elif not (found["connect"] or found["pairing"]):
+                status.config(text="Couldn't find the phone automatically — check "
+                                   "Wireless debugging is ON, or type the "
+                                   "addresses from the phone's screen.")
+
+        def scan():
+            status.config(text="Looking for the phone on your network…")
+
+            def work():
+                found = mdns_discover(Adb(self.adb.adb_path))
+                self._post(fill, found)
+            self._run_bg(work)
+
+        self._flat_button(win, "🔍  Find my phone", scan, SLATE, SLATE_HOT).grid(
+            row=5, column=0, pady=(10, 14), padx=(14, 0), sticky="e")
         self._flat_button(win, "📶  Connect", go, GREEN, GREEN_HOT).grid(
-            row=5, column=0, columnspan=2, pady=(10, 14))
+            row=5, column=1, pady=(10, 14), sticky="w")
+        scan()   # auto-fill the addresses when the phone is already advertising
 
     def _poll_devices(self):
         if not self.alive or not self.adb:
@@ -2367,8 +2442,10 @@ class AdCleanerApp:
         win.title("Big files on this phone")
         win.configure(bg=BASE)
         tk.Label(win, text="The biggest files on the phone's shared storage — old videos "
-                           "and downloads usually live here. Deleting is permanent (files "
-                           "do not go to a recycle bin).",
+                           "and downloads usually live here. Deleted files are first "
+                           "copied to this PC, so you can undo from the History tab "
+                           f"(files over {BACKUP_CAP_MB // 1024} GB are too big to copy "
+                           "and are deleted permanently).",
                  bg=BASE, fg=INK, padx=12, pady=8, wraplength=620,
                  justify="left").pack(anchor="w")
         t = ttk.Treeview(win, columns=("file", "size"), show="headings",
@@ -2386,6 +2463,7 @@ class AdCleanerApp:
                                         "(or the storage couldn't be read).", ""))
         t.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.bigfiles_tree = t          # tests
+        self._bigfile_mb = dict(rows)   # path -> MB, for the backup-size cap
         row = ttk.Frame(win)
         row.pack(pady=(0, 10))
         self._flat_button(row, "🗑  Delete selected",
@@ -2397,16 +2475,22 @@ class AdCleanerApp:
             return
         if not messagebox.askyesno(
                 "Delete files",
-                f"Permanently delete {len(paths)} file(s) from the phone?\n\n"
-                "This cannot be undone.", default="no", parent=win):
+                f"Delete {len(paths)} file(s) from the phone?\n\n"
+                "Each file is copied to this PC first, so you can undo from the "
+                f"History tab. Files over {BACKUP_CAP_MB // 1024} GB are too big "
+                "to copy and are deleted permanently.", default="no", parent=win):
             return
         self.busy = True
+        sizes = getattr(self, "_bigfile_mb", {})
+        backup_root = data_dir() / "file_backups"
 
         def work():
             gone, err = [], None
             for p in paths:
                 try:
-                    delete_file(self.adb, p, self.log)
+                    small = sizes.get(p, 0) <= BACKUP_CAP_MB
+                    delete_file(self.adb, p, self.log,
+                                backup_dir=backup_root if small else None)
                     gone.append(p)
                 except Exception as e:
                     err = str(e)
@@ -2425,7 +2509,8 @@ class AdCleanerApp:
             self.status_line("Some files couldn't be deleted. " + self._friendly(err),
                              "error")
         else:
-            self.status_line(f"✅ Deleted {len(gone)} file(s).", "good")
+            self.status_line(f"✅ Deleted {len(gone)} file(s) — copies saved on "
+                             "this PC (History → Undo).", "good")
 
     def on_screenshot(self):
         if self.busy or not self.serial:

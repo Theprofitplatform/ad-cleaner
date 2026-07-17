@@ -17,7 +17,7 @@ from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
 UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications", "debloat",
-            "restrict-data"}
+            "restrict-data", "disable-accessibility"}
 
 
 class ProtectedAppError(Exception):
@@ -267,20 +267,20 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
 
 
 def disable_accessibility(adb, package, log=None):
-    """Switch OFF an app's accessibility service so it can't block its own removal.
-
-    Reads the enabled list, drops the offender's entries, writes the rest back
-    (shell holds WRITE_SECURE_SETTINGS — no root). Returns True on success.
-    """
+    """Switch OFF an app's accessibility service so it can't control the
+    screen (or block its own removal). Reads the enabled list, drops the
+    offender's entries, writes the rest back (shell holds
+    WRITE_SECURE_SETTINGS — no root). Undo restores the dropped entries."""
     cur = adb.shell_text(["settings", "get", "secure", "enabled_accessibility_services"])
-    kept = [s for s in (cur or "").strip().split(":")
-            if s and s != "null" and not s.startswith(package + "/")]
+    entries = [s for s in (cur or "").strip().split(":") if s and s != "null"]
+    removed = [s for s in entries if s.startswith(package + "/")]
+    kept = [s for s in entries if not s.startswith(package + "/")]
     value = ":".join(kept) if kept else "null"
     adb.shell_text(["settings", "put", "secure", "enabled_accessibility_services", value])
     if not kept:
         adb.shell_text(["settings", "put", "secure", "accessibility_enabled", "0"])
     if log is not None:
-        log.append(adb.serial, package, "disable-accessibility", "on",
+        log.append(adb.serial, package, "disable-accessibility", ":".join(removed),
                    ["settings", "put", "secure", "enabled_accessibility_services"], "ok")
     return True
 
@@ -516,6 +516,18 @@ def undo(adb, entry, log):
     elif action == "restrict-data":
         cmd = ["cmd", "netpolicy", "remove", "restrict-background-blacklist", entry["previous"]]
         adb.shell_text(cmd)
+    elif action == "disable-accessibility":
+        removed = entry.get("previous") or ""
+        if not removed:
+            raise AdbError("Nothing recorded to restore for this entry.")
+        cur = (adb.shell_text(["settings", "get", "secure",
+                               "enabled_accessibility_services"]) or "").strip()
+        cur = "" if cur in ("", "null") else cur
+        parts = (cur.split(":") if cur else []) + (removed.split(":") if removed else [])
+        value = ":".join(dict.fromkeys(parts))
+        cmd = ["settings", "put", "secure", "enabled_accessibility_services", value]
+        adb.shell_text(cmd)
+        adb.shell_text(["settings", "put", "secure", "accessibility_enabled", "1"])
     else:
         raise AdbError("This action can't be undone.")
     log.append(adb.serial, pkg, "undo:" + action, entry.get("result"), cmd, "ok")

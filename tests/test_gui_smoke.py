@@ -699,3 +699,13 @@ def test_big_files_window_deletes_selected(root, monkeypatch, tmp_path):
     pump(root, 0.5)
     assert any(c[:2] == ["rm", "-f"] for c in app.adb.calls)
     assert not app.bigfiles_tree.exists("/storage/emulated/0/Movies/big.mp4")
+
+
+def test_owner_row_warns_on_managed_phone(root, monkeypatch, tmp_path):
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app._show_owners({"device": "com.mdm.corp", "profile": None})
+    assert "com.mdm.corp" in app.dev_vars["owner"].get()
+    app._show_owners({"device": None, "profile": None})
+    assert "not a managed" in app.dev_vars["owner"].get()

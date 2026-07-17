@@ -237,6 +237,21 @@ def parse_device_admins(output):
     return admins
 
 
+def parse_owners(output):
+    """`dumpsys device_policy` -> {'device': pkg or None, 'profile': pkg or None}.
+
+    A Device Owner fully controls the phone (MDM — or a scam 'support' app);
+    a Profile Owner on user 0 is the work-profile trick stalkerware uses.
+    The 400-char window keeps the search inside the owner's own block so a
+    later per-app admin's ComponentInfo can't be misattributed.
+    """
+    def owner_after(header):
+        m = re.search(header + r".{0,400}?ComponentInfo\{([\w.]+)/", output or "", re.S)
+        return m.group(1) if m else None
+    return {"device": owner_after(r"Device Owner:"),
+            "profile": owner_after(r"Profile Owner \(User 0\):")}
+
+
 _INSTALL_RE = re.compile(r"firstInstallTime=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 
 
@@ -525,6 +540,10 @@ def demo():
                   first_install=datetime(2020, 1, 1))
     score_app(blocked, now)
     assert blocked.risk == "HIGH" and BLOCKED_REASON in blocked.reasons
+
+    owners = parse_owners("Device Owner:\n  admin=ComponentInfo{com.mdm.x/.A}\n")
+    assert owners == {"device": "com.mdm.x", "profile": None}
+
     print("scanner.py demo OK")
 
 

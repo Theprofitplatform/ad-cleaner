@@ -1,3 +1,4 @@
+import report
 from report import render_history_html, render_receipt_html
 
 RECEIPT = {
@@ -35,3 +36,9 @@ def test_history_escapes_hostile_package_names():
     assert "<script>x" not in out       # not rendered as a live tag
     assert "&lt;script&gt;" in out      # escaped instead
     assert "<table" in out
+
+
+def test_intake_shows_managed_phone():
+    out = report.render_intake_html({"app_count": 0, "managed": "com.mdm.corp (device owner)"})
+    assert "Managed by" in out and "com.mdm.corp (device owner)" in out
+    assert "Managed by" not in report.render_intake_html({"app_count": 0})

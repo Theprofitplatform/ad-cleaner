@@ -121,6 +121,28 @@ def test_resume_reenables(log):
     assert app.enabled is True
 
 
+def test_smart_switch_launches_when_installed(log):
+    adb = FakeAdb()
+    adb.installed.add(actions.SMART_SWITCH)
+    assert actions.launch_smart_switch(adb, log) == "launched"
+    assert ["monkey", "-p", actions.SMART_SWITCH, "1"] in adb.calls
+    assert log.entries[-1]["action"] == "smart-switch"
+
+
+def test_smart_switch_reenables_frozen_then_launches(log):
+    adb = FakeAdb()
+    adb.installed.add(actions.SMART_SWITCH)
+    adb.disabled.add(actions.SMART_SWITCH)
+    assert actions.launch_smart_switch(adb, log) == "launched"
+    assert actions.SMART_SWITCH not in adb.disabled
+
+
+def test_smart_switch_opens_store_when_missing(log):
+    adb = FakeAdb()
+    assert actions.launch_smart_switch(adb, log) == "store"
+    assert any("market://" in c for c in adb.commands)
+
+
 def test_pause_protected_raises_and_touches_nothing(log):
     adb = FakeAdb()
     with pytest.raises(ProtectedAppError):

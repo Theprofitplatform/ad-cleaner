@@ -371,6 +371,29 @@ def backup_apk(adb, app, dest_dir):
     return saved
 
 
+SMART_SWITCH = "com.sec.android.easyMover"
+
+
+def launch_smart_switch(adb, log=None):
+    """Open Samsung Smart Switch (data transfer) on the phone. Re-enables it
+    if frozen; if it's missing (non-Samsung phone), opens its Play Store page
+    instead. Returns "launched" or "store"."""
+    if _is_installed(adb, SMART_SWITCH):
+        if _is_disabled(adb, SMART_SWITCH):
+            adb.shell_text(["pm", "enable", "--user", "0", SMART_SWITCH])
+        cmd = ["monkey", "-p", SMART_SWITCH, "1"]
+        adb.shell_text(cmd)
+        result = "launched"
+    else:
+        cmd = ["am", "start", "-a", "android.intent.action.VIEW",
+               "-d", "market://details?id=" + SMART_SWITCH]
+        adb.shell_text(cmd)
+        result = "store"
+    if log is not None:
+        log.append(adb.serial, SMART_SWITCH, "smart-switch", "-", cmd, result)
+    return result
+
+
 def reboot(adb, log=None):
     adb.reboot()
     if log is not None:

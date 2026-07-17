@@ -17,14 +17,14 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb
 from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
-    clean_risky, clear_caches, clear_private_dns, debloat, fix_role, force_stop,
+    clean_risky, clear_caches, clear_private_dns, debloat, delete_file, fix_role, force_stop,
     pause, read_private_dns,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
-from device import (GB, read_battery_report, read_charging, read_device_stats,
+from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
                     read_resource_report)
 from report import render_history_html, render_intake_html, render_receipt_html
 from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
@@ -575,10 +575,16 @@ class AdCleanerApp:
                                            self.on_debloat, AMBER, AMBER_HOT)
         for b in (self.cache_btn, self.reboot_btn, self.popups_btn, self.bloat_btn):
             b.pack(side="left", padx=(0, 8))
+
+        btns3 = ttk.Frame(tab)
+        btns3.pack(anchor="w", pady=(8, 0))
+        self.bigfiles_btn = self._flat_button(btns3, "🗂  Find big files",
+                                              self.on_big_files, GREEN, GREEN_HOT)
+        self.bigfiles_btn.pack(side="left", padx=(0, 8))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.mirror_btn, self.reboot_btn, self.popups_btn,
                          self.bloat_btn, self.res_btn, self.charge_btn,
-                         self.intake_btn)
+                         self.intake_btn, self.bigfiles_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -2203,6 +2209,85 @@ class AdCleanerApp:
             self._show_device(stats)
         self.status_line(f"✅ Caches cleared. Freed about {freed} GB." if freed > 0
                          else "✅ Caches cleared.", "good")
+
+    def on_big_files(self):
+        if not self.serial:
+            return
+        self._enable_btn(self.bigfiles_btn, False)
+        self.status_line("Looking for big files… this can take a minute on a full phone.")
+
+        def work():
+            rows = read_big_files(self.adb)
+            self._post(self._show_big_files, rows)
+
+        self._run_bg(work)
+
+    def _show_big_files(self, rows):
+        self._enable_btn(self.bigfiles_btn, True)
+        self.status_line("")
+        win = tk.Toplevel(self.root)
+        win.title("Big files on this phone")
+        win.configure(bg=BASE)
+        tk.Label(win, text="The biggest files on the phone's shared storage — old videos "
+                           "and downloads usually live here. Deleting is permanent (files "
+                           "do not go to a recycle bin).",
+                 bg=BASE, fg=INK, padx=12, pady=8, wraplength=620,
+                 justify="left").pack(anchor="w")
+        t = ttk.Treeview(win, columns=("file", "size"), show="headings",
+                         height=16, selectmode="extended")
+        t.heading("file", text="File")
+        t.heading("size", text="Size")
+        t.column("file", width=520, anchor="w")
+        t.column("size", width=90, anchor="e")
+        for path, mb in rows:
+            short = path.replace("/storage/emulated/0/", "").replace("/sdcard/", "")
+            size = f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
+            t.insert("", "end", iid=path, values=(short, size))
+        if not rows:
+            t.insert("", "end", values=("No files over 100 MB found "
+                                        "(or the storage couldn't be read).", ""))
+        t.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        self.bigfiles_tree = t          # tests
+        row = ttk.Frame(win)
+        row.pack(pady=(0, 10))
+        self._flat_button(row, "🗑  Delete selected",
+                          lambda: self._delete_big_files(win, t), RED, RED_HOT).pack()
+
+    def _delete_big_files(self, win, tree):
+        paths = [iid for iid in tree.selection() if iid.startswith("/")]
+        if not paths or self.busy:
+            return
+        if not messagebox.askyesno(
+                "Delete files",
+                f"Permanently delete {len(paths)} file(s) from the phone?\n\n"
+                "This cannot be undone.", default="no", parent=win):
+            return
+        self.busy = True
+
+        def work():
+            gone, err = [], None
+            for p in paths:
+                try:
+                    delete_file(self.adb, p, self.log)
+                    gone.append(p)
+                except Exception as e:
+                    err = str(e)
+            self._post(self._big_files_done, tree, gone, err)
+
+        self._run_bg(work)
+
+    def _big_files_done(self, tree, gone, err):
+        self.busy = False
+        for p in gone:
+            if tree.exists(p):
+                tree.delete(p)
+        self._refresh_history()
+        self._refresh_device()
+        if err:
+            self.status_line("Some files couldn't be deleted. " + self._friendly(err),
+                             "error")
+        else:
+            self.status_line(f"✅ Deleted {len(gone)} file(s).", "good")
 
     def on_screenshot(self):
         if self.busy or not self.serial:

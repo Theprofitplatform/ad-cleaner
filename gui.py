@@ -573,11 +573,14 @@ class AdCleanerApp:
                                             self.on_chrome_popups, AMBER, AMBER_HOT)
         self.bloat_btn = self._flat_button(btns2, "💤  Disable preinstalled junk",
                                            self.on_debloat, AMBER, AMBER_HOT)
-        self.bigfiles_btn = self._flat_button(btns2, "🗂  Find big files",
-                                              self.on_big_files, GREEN, GREEN_HOT)
-        for b in (self.cache_btn, self.reboot_btn, self.popups_btn, self.bloat_btn,
-                  self.bigfiles_btn):
+        for b in (self.cache_btn, self.reboot_btn, self.popups_btn, self.bloat_btn):
             b.pack(side="left", padx=(0, 8))
+
+        btns3 = ttk.Frame(tab)
+        btns3.pack(anchor="w", pady=(8, 0))
+        self.bigfiles_btn = self._flat_button(btns3, "🗂  Find big files",
+                                              self.on_big_files, GREEN, GREEN_HOT)
+        self.bigfiles_btn.pack(side="left", padx=(0, 8))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.mirror_btn, self.reboot_btn, self.popups_btn,
                          self.bloat_btn, self.res_btn, self.charge_btn,

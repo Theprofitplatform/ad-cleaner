@@ -22,6 +22,20 @@ def _html_page(title: str, body: str) -> str:
             f"<style>{_STYLE}</style></head><body>{body}</body></html>")
 
 
+def _shop_header(d: dict) -> str:
+    """Shop name + contact line above the report title, when configured."""
+    name = d.get("shop_name")
+    if not name:
+        return ""
+    contact = d.get("shop_contact") or ""
+    out = f"<p style='font-size:17px;font-weight:bold;margin:0'>{html.escape(name)}</p>"
+    if contact:
+        out += f"<p class='muted' style='margin:0 0 14px'>{html.escape(contact)}</p>"
+    else:
+        out += "<div style='margin-bottom:14px'></div>"
+    return out
+
+
 def render_receipt_html(receipt: dict) -> str:
     """Render a one-page receipt for a single clean. See plan for the dict shape."""
     r = receipt
@@ -44,7 +58,7 @@ def render_receipt_html(receipt: dict) -> str:
     most_used_line = (f"<p><b>Most-used apps:</b> {html.escape(str(r['most_used']))}</p>"
                       if r.get("most_used") else "")
     body = (
-        "<h1>Ad Cleaner — clean receipt</h1>"
+        _shop_header(r) + "<h1>Ad Cleaner — clean receipt</h1>"
         f"<p class='muted'>{html.escape(r.get('when', ''))} &middot; "
         f"{html.escape(r.get('model', ''))} &middot; "
         f"Android {html.escape(str(r.get('android', '')))}</p>"
@@ -72,7 +86,7 @@ def render_intake_html(info: dict) -> str:
     risky_block = ("<ul>" + "".join(f"<li>{html.escape(p)}</li>" for p in risky)
                    + "</ul>" if risky else "<p class='muted'>none flagged</p>")
     body = (
-        "<h1>Phone condition report</h1>"
+        _shop_header(i) + "<h1>Phone condition report</h1>"
         f"<p class='muted'>{html.escape(i.get('when', ''))}</p>"
         "<h2>Device</h2>"
         + row("Model", "model") + row("Android version", "android")
@@ -133,6 +147,9 @@ def demo():
     assert "Free Gift &lt;Deluxe&gt;" in intake                # escaped
     assert "none flagged" in render_intake_html({"app_count": 0}).lower()
     assert "Battery health" not in render_intake_html({"app_count": 0})
+
+    branded = render_receipt_html({**r, "shop_name": "Fix<It>", "shop_contact": "ph 1234"})
+    assert "Fix&lt;It&gt;" in branded and "ph 1234" in branded
 
     hist = render_history_html([{"time": "t", "package": "<b>x", "action": "pause", "result": "ok"}])
     assert "<b>x" not in hist and "&lt;b&gt;x" in hist

@@ -245,6 +245,7 @@ class AdCleanerApp:
     def _save_settings(self):
         try:
             (data_dir() / "settings.json").write_text(json.dumps({
+                **self._settings,
                 "shop_mode": self.shop_mode.get(),
                 "uninstall_mode": self.uninstall_mode.get(),
                 "brand": self.brand_var.get(),
@@ -520,7 +521,10 @@ class AdCleanerApp:
         self.export_btn = self._flat_button(row, "📄  Export report", self.on_export,
                                             SLATE, SLATE_HOT)
         self.export_btn.pack(side="left", padx=6)
-        for b in (self.undo_btn, self.export_btn):
+        self.shopinfo_btn = self._flat_button(row, "🏪  Shop details…",
+                                              self.on_shop_details, SLATE, SLATE_HOT)
+        self.shopinfo_btn.pack(side="left", padx=6)
+        for b in (self.undo_btn, self.export_btn, self.shopinfo_btn):
             self._enable_btn(b, True)  # validate on click
         self._refresh_history()
 
@@ -1746,6 +1750,9 @@ class AdCleanerApp:
                 "packages": res.get("packages", []), "dns": res.get("dns", "Off"),
                 "freed_gb": res.get("freed_gb", 0),
             }
+            if self._settings.get("shop_name"):
+                receipt["shop_name"] = self._settings["shop_name"]
+                receipt["shop_contact"] = self._settings.get("shop_contact", "")
             if self.battery_report and self.battery_report["health_pct"]:
                 receipt["battery_health"] = (
                     f"{self.battery_report['health_pct']}% of original capacity")
@@ -2088,6 +2095,9 @@ class AdCleanerApp:
                 "risky": [a.label.split(" (")[0] or a.package
                           for a in self.apps if a.risk in SUSPICIOUS],
             }
+            if self._settings.get("shop_name"):
+                info["shop_name"] = self._settings["shop_name"]
+                info["shop_contact"] = self._settings.get("shop_contact", "")
             if self.battery_report and self.battery_report["health_pct"]:
                 info["battery_health"] = (
                     f"{self.battery_report['health_pct']}% of original capacity")
@@ -2667,6 +2677,38 @@ class AdCleanerApp:
                 pass
         except Exception as ex:
             self.status_line("Couldn't save report. " + self._friendly(str(ex)), "error")
+
+    def on_shop_details(self):
+        """Shop name + contact printed on receipts and condition reports."""
+        win = tk.Toplevel(self.root)
+        win.title("Shop details")
+        win.configure(bg=BASE)
+        win.transient(self.root)
+        win.grab_set()
+        ttk.Label(win, text="Printed at the top of receipts and condition reports.\n"
+                            "Leave blank for plain reports.",
+                  justify="left").grid(row=0, column=0, columnspan=2,
+                                       padx=14, pady=(12, 8), sticky="w")
+        name = tk.StringVar(value=self._settings.get("shop_name", ""))
+        contact = tk.StringVar(value=self._settings.get("shop_contact", ""))
+        for r, (lbl, var) in enumerate((("Shop name", name),
+                                        ("Phone / website", contact)), start=1):
+            ttk.Label(win, text=lbl).grid(row=r, column=0, sticky="e",
+                                          padx=(14, 8), pady=4)
+            ttk.Entry(win, textvariable=var, width=34).grid(row=r, column=1,
+                                                            sticky="w",
+                                                            padx=(0, 14), pady=4)
+
+        def save():
+            self._settings["shop_name"] = name.get().strip()
+            self._settings["shop_contact"] = contact.get().strip()
+            self._save_settings()
+            win.destroy()
+            self.status_line("✅ Shop details saved — they'll print on every report.",
+                             "good")
+
+        self._flat_button(win, "💾  Save", save, GREEN, GREEN_HOT).grid(
+            row=3, column=0, columnspan=2, pady=(10, 14))
 
     def on_undo(self):
         sel = self.hist.selection()

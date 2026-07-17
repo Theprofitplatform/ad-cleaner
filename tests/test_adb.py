@@ -70,6 +70,14 @@ def test_wifi_connect_skips_pairing_when_blank():
     assert ok and fake.calls == [["connect", "192.168.1.9:37099"]]
 
 
+def test_wifi_connect_rejects_half_filled_pairing():
+    fake = WifiFake()
+    ok, msg = wifi_connect(fake, "192.168.1.9:37099", "192.168.1.9:41567")
+    assert not ok and "both" in msg and fake.calls == []
+    ok, msg = wifi_connect(fake, "192.168.1.9:37099", "", "123456")
+    assert not ok and fake.calls == []
+
+
 def test_wifi_connect_reports_connect_failure():
     fake = WifiFake(connect_out="failed to connect to 192.168.1.9:37099")
     ok, msg = wifi_connect(fake, "192.168.1.9:37099")

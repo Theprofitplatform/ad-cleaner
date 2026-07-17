@@ -1684,7 +1684,7 @@ class AdCleanerApp:
         a = self.selected
         if not a or not self.serial or self.busy:
             return
-        dest = data_dir() / "apk_backups"
+        dest = data_dir() / "apk_backups" / str(self.serial).replace(":", "-")
         self.busy = True
         self.status_line(f"Backing up {a.label.split(' (')[0]}…")
 

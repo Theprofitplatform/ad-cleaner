@@ -134,6 +134,9 @@ def wifi_connect(adb, connect_hostport, pair_hostport="", code=""):
     when it fails, so success is judged from the output text, not the exit
     code. Once connected the phone shows up in `adb devices` with an
     ip:port serial and the normal poll takes over."""
+    if bool(pair_hostport) != bool(code):
+        return False, ("To pair, fill in both the pairing address and the "
+                       "pairing code (or leave both empty if already paired).")
     if pair_hostport and code:
         try:
             out = adb.run(["pair", pair_hostport, code], timeout=30)

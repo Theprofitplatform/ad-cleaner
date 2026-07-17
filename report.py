@@ -77,6 +77,7 @@ def render_intake_html(info: dict) -> str:
         "<h2>Device</h2>"
         + row("Model", "model") + row("Android version", "android")
         + row("Serial number", "serial")
+        + row("Managed by (MDM / work profile)", "managed")
         + "<h2>Health at drop-off</h2>"
         + row("Battery level", "battery_level")
         + row("Battery health", "battery_health")

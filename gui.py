@@ -27,7 +27,7 @@ from crashes import read_crash_report, summarize
 from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
                     read_resource_report)
 from report import render_history_html, render_intake_html, render_receipt_html
-from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory
+from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory, parse_owners
 from setup_helper import download_platform_tools
 
 import appicon
@@ -199,6 +199,7 @@ class AdCleanerApp:
         self.busy = False
         self._pending_clean = False
         self.battery_report = None
+        self.owners = None
         self._settings = self._load_settings()
         self.shop_mode = tk.BooleanVar(value=self._settings.get("shop_mode", False))
         self.uninstall_mode = tk.BooleanVar(
@@ -529,14 +530,15 @@ class AdCleanerApp:
 
         self.dev_vars = {k: tk.StringVar(value="—")
                          for k in ("storage", "ram", "temp", "battery",
-                                   "battery_health", "top_drainer")}
+                                   "battery_health", "top_drainer", "owner")}
         self.dev_labels = {}
         grid = ttk.Frame(tab)
         grid.pack(anchor="w")
         rows = [("💾  Storage", "storage"), ("🧠  Memory (RAM)", "ram"),
                 ("🌡️  Battery temperature", "temp"), ("🔋  Battery level", "battery"),
                 ("🩺  Battery health", "battery_health"),
-                ("⚡  Top battery user", "top_drainer")]
+                ("⚡  Top battery user", "top_drainer"),
+                ("🏢  Managed / work profile", "owner")]
         for i, (label, key) in enumerate(rows):
             ttk.Label(grid, text=label, font=(FONT, 11, "bold")).grid(
                 row=i, column=0, sticky="w", padx=(0, 24), pady=6)
@@ -1146,6 +1148,7 @@ class AdCleanerApp:
         for v in self.dev_vars.values():
             v.set("—")
         self.battery_report = None  # don't let phone A's health survive into phone B's session
+        self.owners = None
         if was:
             self.status_line("Phone disconnected.")
             self.apps = []
@@ -1837,6 +1840,11 @@ class AdCleanerApp:
                 self._post(self._show_battery_report, report)
             except Exception:
                 pass
+            try:
+                owners = parse_owners(self.adb.shell_text(["dumpsys", "device_policy"]))
+                self._post(self._show_owners, owners)
+            except Exception:
+                pass
 
         self._run_bg(work)
 
@@ -1883,6 +1891,18 @@ class AdCleanerApp:
         top = report["top_drainers"]
         self.dev_vars["top_drainer"].set(
             f"{top[0][0]} ({top[0][1]:g} mAh since last charge)" if top else "—")
+
+    def _show_owners(self, owners):
+        self.owners = owners
+        dev, prof = owners.get("device"), owners.get("profile")
+        if dev or prof:
+            kind = "device owner" if dev else "work profile"
+            self.dev_vars["owner"].set(f"⚠ Controlled by {dev or prof} ({kind}) — "
+                                       "ask if the customer expects this")
+            self.dev_labels["owner"].config(foreground="#b45309")
+        else:
+            self.dev_vars["owner"].set("none — not a managed phone")
+            self.dev_labels["owner"].config(foreground=INK)
 
     def on_resources(self):
         if not self.serial:
@@ -2022,6 +2042,9 @@ class AdCleanerApp:
                 "model": getattr(self, "model", "") or "",
                 "android": getattr(self, "android", "") or "",
                 "serial": self.serial or "",
+                "managed": (lambda o: (f"{o['device']} (device owner)" if o and o.get("device")
+                            else f"{o['profile']} (work profile)" if o and o.get("profile")
+                            else ""))(getattr(self, "owners", None)),
                 "battery_level": (f"{stats['battery_level']}%"
                                   if stats.get("battery_level") is not None else ""),
                 "battery_temp": (f"{stats['battery_temp_c']} °C"

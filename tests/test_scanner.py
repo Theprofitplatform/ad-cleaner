@@ -7,8 +7,8 @@ import scanner
 from scanner import (
     App, build_inventory, looks_random, parse_device_admins, parse_disabled,
     parse_enabled_accessibility, parse_first_install, parse_launcher_packages,
-    parse_overlay_allowed, parse_perms, parse_role_holders, parse_third_party,
-    prettify_label, score_app,
+    parse_overlay_allowed, parse_owners, parse_perms, parse_role_holders,
+    parse_third_party, prettify_label, score_app,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -89,6 +89,20 @@ def test_parse_device_admins():
     assert admins == {
         "com.evil.deviceadmin": "com.evil.deviceadmin/com.evil.deviceadmin.AdminReceiver"
     }
+
+
+def test_parse_owners():
+    out = ("Current Device Policy Manager state:\n"
+           "  Device Owner: \n"
+           "    admin=ComponentInfo{com.mdm.corp/com.mdm.corp.Admin}\n"
+           "    name=Corp MDM\n"
+           "  Profile Owner (User 0): \n"
+           "    admin=ComponentInfo{com.spy.hidden/com.spy.hidden.P}\n")
+    assert parse_owners(out) == {"device": "com.mdm.corp", "profile": "com.spy.hidden"}
+    assert parse_owners("") == {"device": None, "profile": None}
+    assert parse_owners(None) == {"device": None, "profile": None}
+    # a dump with per-app admins but no owner block stays None
+    assert parse_owners(fx("device_policy.txt")) == {"device": None, "profile": None}
 
 
 def test_parse_first_install():

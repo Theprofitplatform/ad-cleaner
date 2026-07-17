@@ -19,7 +19,7 @@ from actions import (
     ActionLog, DNS_PROVIDERS, ProtectedAppError, backup_apk, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
     fix_role, force_stop,
-    launch_smart_switch, pause, read_private_dns,
+    pause, read_private_dns,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
 )
@@ -589,14 +589,11 @@ class AdCleanerApp:
         btns3.pack(anchor="w", pady=(8, 0))
         self.bigfiles_btn = self._flat_button(btns3, "🗂  Find big files",
                                               self.on_big_files, GREEN, GREEN_HOT)
-        self.smartswitch_btn = self._flat_button(btns3, "📲  Smart Switch (transfer data)",
-                                                 self.on_smart_switch, SLATE, SLATE_HOT)
-        for b in (self.bigfiles_btn, self.smartswitch_btn):
-            b.pack(side="left", padx=(0, 8))
+        self.bigfiles_btn.pack(side="left", padx=(0, 8))
         self.dev_btns = (self.dev_refresh_btn, self.cache_btn, self.shot_btn,
                          self.mirror_btn, self.reboot_btn, self.popups_btn,
                          self.bloat_btn, self.res_btn, self.charge_btn,
-                         self.intake_btn, self.bigfiles_btn, self.smartswitch_btn)
+                         self.intake_btn, self.bigfiles_btn)
         for b in self.dev_btns:
             self._enable_btn(b, False)
         ttk.Label(tab, text="Clearing caches frees space and can fix misbehaving apps. "
@@ -2487,21 +2484,6 @@ class AdCleanerApp:
             self.status_line("Rebooting the phone…", "good")
         except Exception as e:
             self.status_line("Couldn't reboot. " + self._friendly(str(e)), "error")
-
-    def on_smart_switch(self):
-        if self.busy or not self.serial:
-            return
-        try:
-            result = launch_smart_switch(self.adb, self.log)
-            self._refresh_history()
-            if result == "launched":
-                self.status_line("Smart Switch is open on the phone.", "good")
-            else:
-                self.status_line("Smart Switch isn't on this phone — opened its "
-                                 "Play Store page so you can install it.", "warn")
-        except Exception as e:
-            self.status_line("Couldn't open Smart Switch. " + self._friendly(str(e)),
-                             "error")
 
     def on_chrome_popups(self):
         """One-click fix for fake-virus site-notification spam: Chrome is the only

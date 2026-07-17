@@ -6,6 +6,8 @@ Regenerate with scripts/update_stalkerware.py (dev-time only; the app
 itself never touches the network).
 """
 
+UPDATED = "2026-07-14"   # stamped by scripts/update_stalkerware.py
+
 STALKERWARE = frozenset({
     "Aktualizacja.apps", "YWZiZDFjZTg2NTZlOGI4NDkyYWJjZDJjZDE5ZTM0Mjk.MzkwMmNhZGFiZGZhMjMyZjQzNTJkYmQ1ODg1ZjI1NzA", "a.tck.lvmchi", "afs.hbmoczc",
     "ahmyth.mine.king.ahmyth", "and.GuardTrial", "and.LocatorTrial", "android.helper.system",

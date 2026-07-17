@@ -153,6 +153,39 @@ def wifi_connect(adb, connect_hostport, pair_hostport="", code=""):
     return ok, out.strip()
 
 
+_MDNS_ADDR_RE = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3}:\d+)\b")
+
+
+def parse_mdns_services(output):
+    """`adb mdns services` output -> {'connect': [ip:port, ...], 'pairing': [...]}.
+
+    Lines look like `adb-R58N…-x  _adb-tls-connect._tcp  192.168.1.9:37099`;
+    the service-type spelling drifts across adb versions, so classify on the
+    'pairing' substring and keep anything else with an address as a connect
+    candidate."""
+    found = {"connect": [], "pairing": []}
+    for line in (output or "").splitlines():
+        if "_adb" not in line:
+            continue
+        m = _MDNS_ADDR_RE.search(line)
+        if not m:
+            continue
+        kind = "pairing" if "pairing" in line else "connect"
+        if m.group(1) not in found[kind]:
+            found[kind].append(m.group(1))
+    return found
+
+
+def mdns_discover(adb):
+    """Phones advertising Wireless debugging on this network, via adb's own
+    mDNS. Best effort: empty lists when mDNS is off or the query fails."""
+    try:
+        out = adb.run(["mdns", "services"], timeout=10)
+    except AdbError:
+        out = ""
+    return parse_mdns_services(out)
+
+
 def parse_devices(output):
     devices = []
     for line in output.splitlines():
@@ -204,6 +237,13 @@ def demo():
                     "connect": "connected to 1.2.3.4:5555"}[args[0]]
     ok, _ = wifi_connect(_F(), "1.2.3.4:5555", "1.2.3.4:4444", "123456")
     assert ok
+
+    mdns = parse_mdns_services(
+        "List of discovered mdns services\n"
+        "adb-R58N-x\t_adb-tls-connect._tcp\t192.168.1.9:37099\n"
+        "adb-R58N-x\t_adb-tls-pairing._tcp\t192.168.1.9:41234\n")
+    assert mdns == {"connect": ["192.168.1.9:37099"],
+                    "pairing": ["192.168.1.9:41234"]}, mdns
     print("adb.py demo OK")
 
 

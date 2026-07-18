@@ -28,6 +28,7 @@ from actions import (
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
+from battery import read_battery_report, summarize as battery_summarize
 from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
                     read_resource_report)
 from report import render_history_html, render_intake_html, render_receipt_html
@@ -42,7 +43,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -411,6 +412,7 @@ class AdCleanerApp:
         self._build_device_tab(nb)
         self._build_move_tab(nb)
         self._build_crashes_tab(nb)
+        self._build_battery_tab(nb)
         self._build_help_tab(nb)
         self.notebook = nb
 
@@ -934,6 +936,82 @@ class AdCleanerApp:
         if not report["events"]:
             self.crash_tree.insert("", "end", values=("", "No crash records found.", ""))
 
+    def _build_battery_tab(self, nb):
+        tab = ttk.Frame(nb, padding=18)
+        nb.add(tab, text="Battery")
+        ttk.Label(tab, text="What's draining the battery?",
+                  font=(FONT, 14, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Shows how much battery each app has used since the phone's "
+                            "last full charge (Android keeps no exact 24-hour figure). "
+                            "A no-name app near the top is a red flag. Nothing is changed.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 12))
+
+        self.batt_summary = tk.Label(tab, text="Press “Check battery usage” below.",
+                                     anchor="w", font=(FONT, 12, "bold"),
+                                     bg=BASE, fg=MUTED, padx=12, pady=9)
+        self.batt_summary.pack(fill="x", pady=(0, 8))
+
+        wrap = ttk.Frame(tab)
+        wrap.pack(fill="both", expand=True)
+        cols = ("name", "mah", "share")
+        self.batt_tree = ttk.Treeview(wrap, columns=cols, show="headings",
+                                      selectmode="browse")
+        for c, head, w in zip(cols, ("App / service", "Battery used (mAh)", "Share"),
+                              (360, 150, 90)):
+            self.batt_tree.heading(c, text=head)
+            self.batt_tree.column(c, width=w, anchor="w",
+                                  stretch=(c == "name"))
+        self.batt_tree.tag_configure("app", foreground=RED)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.batt_tree.yview)
+        self.batt_tree.configure(yscrollcommand=vsb.set)
+        self.batt_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.batt_btn = self._flat_button(tab, "🔋  Check battery usage",
+                                          self.on_check_battery, SLATE, SLATE_HOT)
+        self.batt_btn.pack(anchor="w", pady=(10, 0))
+        self._enable_btn(self.batt_btn, False)
+
+    def on_check_battery(self):
+        if self.busy or not self.serial:
+            return
+        self.busy = True
+        self._enable_btn(self.batt_btn, False)
+        self.batt_summary.config(
+            text="Reading battery usage… (this can take a moment)",
+            bg=BASE, fg=MUTED)
+
+        def work():
+            try:
+                report = read_battery_report(self.adb)
+                self._post(self._show_battery, report, None)
+            except Exception as e:
+                self._post(self._show_battery, None, str(e))
+
+        self._run_bg(work)
+
+    def _show_battery(self, report, err):
+        self.busy = False
+        if self.serial:
+            self._enable_btn(self.batt_btn, True)
+        if err:
+            bg, fg = BANNER["alert"]
+            self.batt_summary.config(
+                text="Couldn't read battery usage. " + self._friendly(err), bg=bg, fg=fg)
+            return
+        text, kind = battery_summarize(report["uses"], report["computed"])
+        bg, fg = BANNER[kind]
+        self.batt_summary.config(text=text, bg=bg, fg=fg)
+        total = report["computed"] or sum(u.mah for u in report["uses"]) or 1.0
+        self.batt_tree.delete(*self.batt_tree.get_children())
+        for i, u in enumerate(report["uses"]):
+            self.batt_tree.insert("", "end", iid=str(i),
+                                  tags=(("app",) if u.is_app else ()),
+                                  values=(u.name, f"{u.mah:.0f}",
+                                          f"{100 * u.mah / total:.0f}%"))
+        if not report["uses"]:
+            self.batt_tree.insert("", "end", values=("No battery data yet.", "", ""))
+
     def _build_help_tab(self, nb):
         tab = ttk.Frame(nb)
         nb.add(tab, text="Help")
@@ -1287,6 +1365,7 @@ class AdCleanerApp:
         for b in self.bulk_btns + self.dev_btns + self.dns_btns + self.move_btns:
             self._enable_btn(b, True)
         self._enable_btn(self.crash_btn, True)
+        self._enable_btn(self.batt_btn, True)
         self._refresh_device()
         self._refresh_dns()
         self.status_line("Phone connected. Scanning apps…")

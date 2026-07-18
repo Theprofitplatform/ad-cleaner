@@ -99,6 +99,7 @@ individual apps), then restart the phone normally.
 | **📲 Smart Switch (transfer data)** | On the Device tab. Opens Samsung's Smart Switch on the phone so you can send apps, texts and more to a new phone, cable-to-cable. |
 | **🏪 Shop details…** | On the History tab. Enter your shop's name and contact details once and they'll print at the top of every receipt and condition report. |
 | **📶 Connect over Wi-Fi…** | In the connect wizard. For phones whose USB port charges but won't carry data — connects wirelessly instead of over the cable. |
+| **🔋 Check battery usage** | On the Battery tab. Ranks every app by how much battery it's used since the phone's last full charge and names the package, so a no-name adware app draining the battery in the background stands out. Read-only. |
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.
 

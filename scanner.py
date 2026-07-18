@@ -179,6 +179,12 @@ KNOWN_LABELS = {
     "com.google.android.googlequicksearchbox": "Google Search",
     "com.google.android.youtube": "YouTube",
     "com.google.android.apps.photos": "Google Photos",
+    # Seen mislabeled on live phones (last-segment guess is wrong or misleading):
+    "org.telegram.messenger": "Telegram",           # guessed "Messenger" (reads as Facebook's)
+    "ai.perplexity.app.android": "Perplexity",      # guessed "Android"
+    "com.paypal.android.p2pmobile": "PayPal",       # guessed "P2pmobile"
+    "com.openai.chatgpt": "ChatGPT",                # guessed "Chatgpt"
+    "com.americanexpress.android.acctsvcs.au": "American Express",  # guessed "Au"
     "com.google.android.aicore": "Android AI Core",
 }
 
@@ -268,9 +274,12 @@ def parse_first_install(dump_text):
     if not m:
         return None
     try:
-        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+        dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
+    # Factory preloads report the epoch (1970-01-01); that's "unknown", not a
+    # date worth showing -- and it must not count as anything meaningful.
+    return None if dt.year < 1980 else dt
 
 
 def parse_perms(dump_text):

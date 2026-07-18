@@ -19,7 +19,7 @@ from tkinter import filedialog, messagebox, ttk
 from adb import Adb, AdbError, data_dir, find_adb, mdns_discover, wifi_connect
 from actions import (
     ActionLog, BACKUP_CAP_MB, DNS_PROVIDERS, ProtectedAppError, backup_apk,
-    block_notifications, can_undo,
+    block_browser_popups, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
     fix_role, force_stop,
     launch_smart_switch, pause, read_private_dns,
@@ -42,7 +42,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.5.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -623,7 +623,7 @@ class AdCleanerApp:
                                            self.on_clear_caches, GREEN, GREEN_HOT)
         self.reboot_btn = self._flat_button(btns2, "🔌  Reboot phone",
                                             self.on_reboot, SLATE, SLATE_HOT)
-        self.popups_btn = self._flat_button(btns2, "🚫  Stop fake virus pop-ups (Chrome)",
+        self.popups_btn = self._flat_button(btns2, "🚫  Stop fake virus pop-ups (browser)",
                                             self.on_chrome_popups, AMBER, AMBER_HOT)
         self.bloat_btn = self._flat_button(btns2, "💤  Disable preinstalled junk",
                                            self.on_debloat, AMBER, AMBER_HOT)
@@ -1952,9 +1952,23 @@ class AdCleanerApp:
         def work():
             try:
                 before = self._free_gb()
+                risky_before = sum(1 for a in self.apps if a.enabled and will_clean(a))
                 res = clean_risky(self.adb, self.apps, self.log, progress=progress,
                                   remove=remove)
                 res["freed_gb"] = round(max(0.0, self._free_gb() - before), 1)
+                # Verification pass: rescan and prove the result on the receipt.
+                # Best effort — a failed rescan just leaves the line off.
+                try:
+                    self._post(self.status_line, "Checking the clean worked…")
+                    fresh = build_inventory(self.adb)
+                    left = [a for a in fresh if a.enabled and will_clean(a)]
+                    res["fresh_apps"] = fresh
+                    res["risky_before"] = risky_before
+                    res["risky_after"] = len(left)
+                    res["remaining"] = [a.label.split(" (")[0] or a.package
+                                        for a in left]
+                except Exception:
+                    pass
                 try:
                     mode, host = read_private_dns(self.adb)
                     label = next((k for k, v in DNS_PROVIDERS.items() if v == host), host)
@@ -1974,7 +1988,10 @@ class AdCleanerApp:
             self.status_line("Couldn't finish cleaning. " + self._friendly(err), "error")
             messagebox.showwarning("Couldn't finish", self._friendly(err))
             return
-        if res["removed"]:  # drop the uninstalled apps from the list
+        if res.get("fresh_apps"):   # verification rescan doubles as a refresh
+            self.apps = res.pop("fresh_apps")
+            self.selected = None
+        elif res["removed"]:        # no rescan — drop the uninstalled apps
             gone = set(res["packages"])
             self.apps = [a for a in self.apps if a.package not in gone]
             self.selected = None
@@ -1983,6 +2000,9 @@ class AdCleanerApp:
         self._update_detail()
         verb = "removed" if res["removed"] else "paused"
         summary = f"Closed {res['stopped']} app(s) and {verb} {res['acted']} risky one(s)."
+        if res.get("risky_after") is not None:
+            summary += (f" Checked: {res['risky_after']} risky app(s) still active."
+                        if res["risky_after"] else " Checked: no risky apps left active.")
         receipt_path = self._save_receipt(res)
         if self.shop_mode.get():
             # Hands-off: a loud on-screen cue (+ chime) for the next phone; no modal.
@@ -2592,34 +2612,39 @@ class AdCleanerApp:
                              "error")
 
     def on_chrome_popups(self):
-        """One-click fix for fake-virus site-notification spam: Chrome is the only
-        no-root path for these, so this silences ALL its notifications at once."""
+        """One-click fix for fake-virus site-notification spam, in every
+        installed browser (Chrome / Samsung Internet / Firefox)."""
         if self.busy or not self.serial:
             return
         if not messagebox.askyesno(
                 "Stop fake virus pop-ups",
-                "This silences ALL Chrome notifications (including sites the customer "
-                "wants). They can re-enable in Android Settings. Continue?", default="no"):
+                "This silences ALL notifications from Chrome, Samsung Internet and "
+                "Firefox — whichever are installed — including sites the customer "
+                "wants. They can re-enable in Android Settings. Continue?",
+                default="no"):
             return
         self.busy = True
-        self.status_line("Stopping Chrome notifications…")
+        self.status_line("Stopping browser notifications…")
 
         def work():
             try:
-                block_notifications(self.adb, "com.android.chrome", self.log)
-                self._post(self._chrome_popups_done, None)
+                done = block_browser_popups(self.adb, self.log)
+                self._post(self._chrome_popups_done, done, None)
             except AdbError as e:
-                self._post(self._chrome_popups_done, str(e))
+                self._post(self._chrome_popups_done, [], str(e))
 
         self._run_bg(work)
 
-    def _chrome_popups_done(self, err):
+    def _chrome_popups_done(self, done, err):
         self.busy = False
-        if err:
-            self.status_line("Couldn't stop Chrome notifications. " + self._friendly(err),
+        self._refresh_history()
+        if err or not done:
+            self.status_line("Couldn't stop browser notifications. "
+                             + self._friendly(err or "no browser found on the phone"),
                              "error")
         else:
-            self.status_line("✅ Chrome notifications stopped.", "good")
+            self.status_line("✅ Notifications stopped in " + ", ".join(done) + ".",
+                             "good")
 
     def on_debloat(self):
         """Find + disable preinstalled junk (carrier installers, OEM ad

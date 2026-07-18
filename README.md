@@ -83,14 +83,14 @@ individual apps), then restart the phone normally.
 
 | Button | What happens |
 |---|---|
-| **✨ CLEAN MY PHONE** | The easy one. Closes all downloaded apps, blocks pop-ups, and pauses the risky ones — in one click. Nothing deleted. |
+| **✨ CLEAN MY PHONE** | The easy one. Closes all downloaded apps, blocks pop-ups, pauses the risky ones, and takes away their power to install more apps — in one click. Nothing deleted. It then **re-scans to check the clean worked** and prints the result on the receipt. |
 | **⏹ STOP ALL** | Just closes every downloaded app right now (no pausing). |
 | **⏸ Pause** | Freezes one app so it can't run. Fully reversible with **Resume**. |
 | **▶ Resume** | Un-freezes a paused app. |
 | **🗑 Uninstall** | Removes an app for you. Restore it later from the **History** tab. |
 | **🛠 Restore default apps** | In an app's detail panel when it has hijacked your browser, texts, home screen or dialer. Hands the default back to the stock app. |
 | **🔕 Stop its notifications** | In an app's detail panel. Silences an app that floods the phone with notifications. Reversible. |
-| **🚫 Stop fake virus pop-ups (Chrome)** | On the Device tab. Silences Chrome's website notifications — the usual source of "your phone has a virus" scare pop-ups. |
+| **🚫 Stop fake virus pop-ups (browser)** | On the Device tab. Silences website notifications in Chrome, Samsung Internet and Firefox (whichever are installed) — the usual source of "your phone has a virus" scare pop-ups. |
 | **💤 Disable preinstalled junk** | On the Device tab. Switches off known carrier/maker bloat (never uninstalls, so it can't brick the phone; reversible from History). |
 | **📵 Block background data** | In an app's detail panel. Stops an app using mobile data in the background. Reversible. |
 | **🛡️ Block ads (Private DNS)** | On the Device tab. Sends the phone's DNS through an ad-blocking resolver so ads are blocked in **every** app, even ones you keep. Reversible with **Turn off**. |

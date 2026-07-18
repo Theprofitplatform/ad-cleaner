@@ -263,6 +263,41 @@ def test_clean_risky_skips_nuisance_name_only_medium(log):
     assert "com.phone.cleaner" not in adb.disabled
 
 
+def test_clean_risky_blocks_install_power(log):
+    adb = FakeAdb()
+    dropper = App(package="com.random.adware", installer=None, overlay=True,
+                  risk="HIGH", request_install=True)
+    res = clean_risky(adb, [dropper], log)
+    assert res["installs_blocked"] == 1
+    assert ["appops", "set", "com.random.adware",
+            "REQUEST_INSTALL_PACKAGES", "deny"] in adb.calls
+    entry = next(e for e in log.recent() if e["action"] == "block-install")
+    assert can_undo(entry)
+    undo(adb, entry, log)
+    assert ["appops", "set", "com.random.adware",
+            "REQUEST_INSTALL_PACKAGES", "allow"] in adb.calls
+
+
+def test_clean_risky_remove_mode_skips_install_block(log):
+    # Uninstalled apps are gone — nothing to revoke, and no phantom log entries.
+    adb = FakeAdb()
+    dropper = App(package="com.random.adware", installer=None, overlay=True,
+                  risk="HIGH", request_install=True)
+    res = clean_risky(adb, [dropper], log, remove=True)
+    assert res["installs_blocked"] == 0
+    assert not any("REQUEST_INSTALL_PACKAGES" in c for c in adb.commands)
+
+
+def test_block_browser_popups_hits_only_installed_browsers(log):
+    adb = FakeAdb()
+    adb.installed.update({"com.android.chrome", "com.sec.android.app.sbrowser"})
+    done = actions.block_browser_popups(adb, log)
+    assert done == ["Chrome", "Samsung Internet"]
+    # Firefox absent: probed with pm path but never acted on.
+    assert not any("firefox" in c and "pm path" not in c for c in adb.commands)
+    assert sum(1 for e in log.recent() if e["action"] == "block-notifications") == 2
+
+
 def test_will_clean_ignores_play_not_listed_reason_in_nuisance_fence():
     # The Play-lookup feature appends NOT_LISTED_REASON to a.reasons for
     # display. That must not defeat the nuisance-only fence (Fix 1).

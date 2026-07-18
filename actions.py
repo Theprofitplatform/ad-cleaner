@@ -17,7 +17,7 @@ from protected import is_protected
 from scanner import REASONS, STOCK_ROLE_HOLDERS, parse_disabled
 
 UNDOABLE = {"pause", "uninstall", "block-popup", "fix-role", "block-notifications", "debloat",
-            "restrict-data", "disable-accessibility"}
+            "restrict-data", "disable-accessibility", "block-install"}
 
 
 class ProtectedAppError(Exception):
@@ -255,6 +255,7 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
     # counts confirmed blocks, not attempts.
     popups = sum(1 for a in overlay_targets if not a.overlay)
     acted = []
+    installs_blocked = 0
     for app in apps:
         if not will_clean(app):
             continue
@@ -262,11 +263,21 @@ def clean_risky(adb, apps, log, progress=None, remove=False):
             if remove:
                 if uninstall(adb, app, log):
                     acted.append(app.package)
+                    continue        # gone — nothing left to revoke
             elif app.enabled and pause(adb, app, log):
                 acted.append(app.package)
+            # Reinfection fence: a paused app can be resumed later, so also
+            # take away its power to install other apps (undoable).
+            if app.request_install:
+                try:
+                    block_install(adb, app.package, log)
+                    installs_blocked += 1
+                except AdbError:
+                    pass
         except (ProtectedAppError, AdbError):
             pass
-    return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted, "popups_blocked": popups}
+    return {"stopped": stopped, "acted": len(acted), "removed": remove, "packages": acted,
+            "popups_blocked": popups, "installs_blocked": installs_blocked}
 
 
 def disable_accessibility(adb, package, log=None):
@@ -345,6 +356,37 @@ def block_notifications(adb, package, log):
         adb.shell_text(cmd)
     log.append(adb.serial, package, "block-notifications", "allowed", cmd, "ok")
     return True
+
+
+def block_install(adb, package, log):
+    """Take away an app's 'install unknown apps' ability — the reinfection
+    channel adware uses to re-download its friends after a clean. Safe and
+    reversible (History → Undo restores it)."""
+    cmd = ["appops", "set", package, "REQUEST_INSTALL_PACKAGES", "deny"]
+    adb.shell_text(cmd)
+    log.append(adb.serial, package, "block-install", "allow", cmd, "ok")
+    return True
+
+
+# Browsers whose site notifications carry the "your phone has a virus" scares.
+BROWSERS = {"com.android.chrome": "Chrome",
+            "com.sec.android.app.sbrowser": "Samsung Internet",
+            "org.mozilla.firefox": "Firefox"}
+
+
+def block_browser_popups(adb, log):
+    """Silence site notifications in every installed browser from BROWSERS.
+    Returns the friendly names actually silenced (each logged + undoable)."""
+    done = []
+    for pkg, name in BROWSERS.items():
+        if not _installed(adb, pkg):
+            continue
+        try:
+            block_notifications(adb, pkg, log)
+            done.append(name)
+        except AdbError:
+            pass
+    return done
 
 
 def restrict_background(adb, package, uid, log):
@@ -555,6 +597,9 @@ def undo(adb, entry, log):
             cmd = ["appops", "set", pkg, "POST_NOTIFICATION", "allow"]
         else:
             cmd = ["pm", "grant", pkg, "android.permission.POST_NOTIFICATIONS"]
+        adb.shell_text(cmd)
+    elif action == "block-install":
+        cmd = ["appops", "set", pkg, "REQUEST_INSTALL_PACKAGES", "allow"]
         adb.shell_text(cmd)
     elif action == "delete-file":
         local = entry.get("backup") or ""

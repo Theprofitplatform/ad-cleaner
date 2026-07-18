@@ -36,7 +36,8 @@ class FakeAdb:
         self.adb_path = path
         self.serial = serial
         self.disabled = set()
-        self.installed = {"com.random.adware", "com.google.android.gms"}
+        self.installed = {"com.random.adware", "com.google.android.gms",
+                          "com.android.chrome"}
         self.calls = []
         self.commands = []
         self.rebooted = False
@@ -155,8 +156,15 @@ def _wire(gui_mod, monkeypatch, tmp_path, adb_cls=FakeAdb):
     monkeypatch.setattr(gui_mod, "ActionLog", lambda: ActionLog(tmp_path / "log.json"))
     monkeypatch.setattr(gui_mod, "find_adb", lambda: "fakeadb")
     monkeypatch.setattr(gui_mod, "Adb", adb_cls)
+    def _inventory(adb):
+        # Mirror the fake device's state so post-clean verification rescans
+        # behave like a real phone (uninstalled gone, paused disabled).
+        apps = [a for a in make_apps() if a.package in adb.installed]
+        for a in apps:
+            a.enabled = a.package not in adb.disabled
+        return apps
     monkeypatch.setattr(gui_mod, "build_inventory",
-                        lambda adb, progress=None, now=None: make_apps())
+                        lambda adb, progress=None, now=None: _inventory(adb))
     monkeypatch.setattr(gui_mod.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(gui_mod.messagebox, "showinfo", lambda *a, **k: None)
     monkeypatch.setattr(gui_mod.webbrowser, "open", lambda *a, **k: None)

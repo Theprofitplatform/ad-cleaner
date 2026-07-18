@@ -131,6 +131,19 @@ def test_parse_perms_sensitive():
     assert perms["sensitive_data"] is True  # READ_SMS counts as personal-data access
 
 
+def test_parse_perms_boot_receiver():
+    assert parse_perms("android.permission.RECEIVE_BOOT_COMPLETED")["boot_receiver"]
+    assert not parse_perms("android.permission.CAMERA")["boot_receiver"]
+
+
+def test_boot_receiver_scored():
+    app = App(package="com.ads.startup", installer="com.android.vending",
+              boot_receiver=True, first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert scanner.REASONS["boot_receiver"] in app.reasons
+    assert app.score == 10
+
+
 def test_parse_launcher_packages():
     out = "2 activities found:\n  com.foo/.Main\n  com.bar/com.bar.Home\n"
     assert parse_launcher_packages(out) == {"com.foo", "com.bar"}

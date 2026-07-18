@@ -53,6 +53,18 @@ def render_receipt_html(receipt: dict) -> str:
     if pkgs:
         items = "".join(f"<li>{html.escape(p)}</li>" for p in pkgs)
         pkg_block = f"<h2>{verb} apps</h2><ul>{items}</ul>"
+    installs_line = (f"<p><b>Blocked from installing other apps:</b> "
+                     f"{r['installs_blocked']} app(s)</p>"
+                     if r.get("installs_blocked") else "")
+    verify_line = ""
+    if r.get("risky_after") is not None:
+        verify_line = (f"<p><b>Checked after cleaning:</b> "
+                       f"{r.get('risky_before', 0)} risky app(s) found → "
+                       f"{r['risky_after']} still active</p>")
+        remaining = r.get("remaining") or []
+        if remaining:
+            items = "".join(f"<li>{html.escape(p)}</li>" for p in remaining)
+            verify_line += f"<p class='muted'>Still flagged:</p><ul>{items}</ul>"
     battery_line = (f"<p><b>Battery health:</b> {html.escape(str(r['battery_health']))}</p>"
                     if r.get("battery_health") else "")
     most_used_line = (f"<p><b>Most-used apps:</b> {html.escape(str(r['most_used']))}</p>"
@@ -65,6 +77,7 @@ def render_receipt_html(receipt: dict) -> str:
         f"<p><b>Apps closed:</b> {r.get('stopped', 0)}</p>"
         f"<p><b>Pop-up permissions blocked:</b> {r.get('popups_blocked', 0)}</p>"
         f"<p><b>{verb}:</b> {r.get('acted', 0)} risky app(s)</p>"
+        f"{installs_line}{verify_line}"
         f"<p><b>Ad blocking (Private DNS):</b> {html.escape(str(r.get('dns', 'Off')))}</p>"
         f"{freed_line}{battery_line}{most_used_line}{pkg_block}"
     )

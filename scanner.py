@@ -30,6 +30,7 @@ WEIGHTS = {
     "random_name": 10,         # package name has a random-looking segment
     "nuisance": 30,            # junk cleaner/booster/optimizer or fake-app name
     "notif_spam": 10,          # floods the notification shade
+    "boot_receiver": 10,       # restarts itself on every reboot (RECEIVE_BOOT_COMPLETED)
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
@@ -45,6 +46,7 @@ REASONS = {
     "random_name": "Has a random-looking package name",
     "nuisance": "Looks like a junk cleaner/booster/optimizer app",
     "notif_spam": "Floods the phone with notifications",
+    "boot_receiver": "Restarts itself when the phone reboots",
 }
 BLOCKED_REASON = "On the known-bad app blocklist"
 
@@ -111,6 +113,7 @@ class App:
     first_install: datetime | None = None
     request_install: bool = False
     accessibility: bool = False
+    boot_receiver: bool = False       # holds RECEIVE_BOOT_COMPLETED
     hidden: bool = False              # no launcher icon on the phone
     sensitive_data: bool = False      # can read SMS / calls / contacts
     sensitive_perms: list = field(default_factory=list)  # human-readable perm labels
@@ -274,6 +277,7 @@ def parse_perms(dump_text):
         "request_install": "REQUEST_INSTALL_PACKAGES" in dump_text,
         "accessibility": "BIND_ACCESSIBILITY_SERVICE" in dump_text,
         "overlay_perm": "SYSTEM_ALERT_WINDOW" in dump_text,  # old-Android fallback
+        "boot_receiver": "RECEIVE_BOOT_COMPLETED" in dump_text,
         "sensitive_perms": sensitive,
         "sensitive_data": any(f"permission.{k}" in dump_text for k in _PERSONAL_DATA),
     }
@@ -365,6 +369,7 @@ def score_app(app, now):
         "role_hijack": bool(app.hijacked_roles),
         "nuisance": looks_like_junk(app.package, app.label),
         "notif_spam": app.notif_count >= NOISY_THRESHOLD,
+        "boot_receiver": app.boot_receiver,
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
@@ -472,6 +477,7 @@ def build_inventory(adb, progress=None, now=None):
             first_install=parse_first_install(dump),
             request_install=perms["request_install"],
             accessibility=perms["accessibility"],
+            boot_receiver=perms["boot_receiver"],
             hidden=have_launchers and pkg not in launchers,
             sensitive_data=perms["sensitive_data"],
             sensitive_perms=perms["sensitive_perms"],

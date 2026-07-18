@@ -30,6 +30,22 @@ def test_receipt_uninstall_mode_zero_freed_is_not_contradictory():
     assert "Removed" in out
 
 
+def test_receipt_verification_line():
+    out = render_receipt_html({**RECEIPT, "risky_before": 6, "risky_after": 0})
+    assert "6 risky app(s) found → 0 still active" in out
+    left = render_receipt_html({**RECEIPT, "risky_before": 6, "risky_after": 1,
+                                "remaining": ["Free Gift <Deluxe>"]})
+    assert "1 still active" in left
+    assert "Free Gift &lt;Deluxe&gt;" in left           # escaped
+    assert "Checked after cleaning" not in render_receipt_html(RECEIPT)
+
+
+def test_receipt_installs_blocked_line():
+    out = render_receipt_html({**RECEIPT, "installs_blocked": 2})
+    assert "Blocked from installing other apps" in out and "2 app(s)" in out
+    assert "Blocked from installing" not in render_receipt_html(RECEIPT)
+
+
 def test_history_escapes_hostile_package_names():
     out = render_history_html(
         [{"time": "t", "package": "<script>x</script>", "action": "pause", "result": "ok"}])

@@ -31,6 +31,7 @@ WEIGHTS = {
     "nuisance": 30,            # junk cleaner/booster/optimizer or fake-app name
     "notif_spam": 10,          # floods the notification shade
     "boot_receiver": 10,       # restarts itself on every reboot (RECEIVE_BOOT_COMPLETED)
+    "notif_listener": 25,      # notification listener is switched ON (reads every notification)
 }
 REASONS = {
     "overlay": "Can draw pop-ups over other apps",
@@ -47,6 +48,7 @@ REASONS = {
     "nuisance": "Looks like a junk cleaner/booster/optimizer app",
     "notif_spam": "Floods the phone with notifications",
     "boot_receiver": "Restarts itself when the phone reboots",
+    "notif_listener": "Can read every notification (texts and bank codes included)",
 }
 BLOCKED_REASON = "On the known-bad app blocklist"
 
@@ -121,6 +123,8 @@ class App:
     hijacked_roles: list = field(default_factory=list)   # role names it holds (home/browser/…)
     stopped: bool = False             # transient: force-stopped this session
     notif_count: int = 0              # active notifications at scan time
+    notif_titles: list = field(default_factory=list)  # titles it's showing right now
+    notif_listener: bool = False      # notification-listener access is switched ON
     data_mb: int = 0                  # background+foreground data used, MB (dumpsys netstats)
     uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
     used_min: int = 0                 # foreground usage minutes (dumpsys usagestats)
@@ -326,6 +330,26 @@ def parse_notification_counts(output):
     return counts
 
 
+def parse_notification_titles(output):
+    """`dumpsys notification --noredact` -> {package: [distinct titles]}.
+
+    Shows WHAT each app is pushing, so the app posting the ads the customer
+    complains about can be identified by its own words.
+    """
+    titles = {}
+    pkg = None
+    for line in (output or "").splitlines():
+        line = line.strip()
+        m = re.match(r"NotificationRecord\([^)]*\bpkg=([\w.]+)", line)
+        if m:
+            pkg = m.group(1)
+            continue
+        m = re.match(r"android\.title=\w*String \((.+)\)$", line)
+        if m and pkg and m.group(1) not in titles.setdefault(pkg, []):
+            titles[pkg].append(m.group(1))
+    return titles
+
+
 # --- Scoring ----------------------------------------------------------------
 
 def looks_random(package):
@@ -370,6 +394,7 @@ def score_app(app, now):
         "nuisance": looks_like_junk(app.package, app.label),
         "notif_spam": app.notif_count >= NOISY_THRESHOLD,
         "boot_receiver": app.boot_receiver,
+        "notif_listener": app.notif_listener,
     }
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
@@ -447,8 +472,13 @@ def build_inventory(adb, progress=None, now=None):
         for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
                 ["cmd", "role", "get-role-holders", role]))):
             role_owner.setdefault(pkg, []).append(friendly)
-    notif = parse_notification_counts(_safe(lambda: adb.shell_text(
-        ["dumpsys", "notification", "--noredact"])))
+    notif_dump = _safe(lambda: adb.shell_text(
+        ["dumpsys", "notification", "--noredact"]))
+    notif = parse_notification_counts(notif_dump)
+    notif_titles = parse_notification_titles(notif_dump)
+    # Same 'pkg/svc:pkg/svc' format as accessibility services -- reuse the parser.
+    listeners = parse_enabled_accessibility(_safe(lambda: adb.shell_text(
+        ["settings", "get", "secure", "enabled_notification_listeners"])))
     pkg_uids = parse_pkg_uids(_safe(lambda: adb.shell_text(
         ["pm", "list", "packages", "-3", "-U"])))
     data_use = parse_data_use(_safe(lambda: adb.shell_text(
@@ -484,6 +514,8 @@ def build_inventory(adb, progress=None, now=None):
             active_accessibility=pkg in a11y_on,
             hijacked_roles=role_owner.get(pkg, []),
             notif_count=notif.get(pkg, 0),
+            notif_titles=notif_titles.get(pkg, []),
+            notif_listener=pkg in listeners,
             uid=uid,
             # uid 0 means "unresolved" here (the -U lookup failed for this
             # package), not root -- attributing root's netstats bucket to

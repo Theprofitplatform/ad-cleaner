@@ -54,7 +54,8 @@ Some phones' USB ports (or cables) charge fine but can't carry data, so the
 phone never shows up. If that happens, use **📶 Connect over Wi-Fi…** in the
 connect wizard instead:
 
-1. Make sure the **phone and this PC are on the same Wi-Fi network**.
+1. Make sure the **phone and this PC are on the same Wi-Fi network**, and
+   **keep the phone's screen on and unlocked** — locking it cancels pairing.
 2. On the phone: **Developer options → Wireless debugging** → turn it on.
 3. The wizard **looks for the phone on your network and fills the addresses in
    for you** when it can (press **🔍 Find my phone** to look again). If it

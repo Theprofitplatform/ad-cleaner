@@ -42,7 +42,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1117,7 +1117,9 @@ class AdCleanerApp:
         win.transient(self.root)
         win.grab_set()
         ttk.Label(win, justify="left", wraplength=470, text=(
-            "The phone and this PC must be on the same Wi-Fi network.\n\n"
+            "The phone and this PC must be on the same Wi-Fi network.\n"
+            "⚠  Keep the phone's screen ON and unlocked — locking it cancels\n"
+            "     pairing and hides the phone from the search.\n\n"
             "On the phone: Settings → Developer options → Wireless debugging → ON.\n"
             "1.  Tap “Pair device with pairing code” — type the code and the\n"
             "     pairing address it shows (first time only).\n"
@@ -1176,8 +1178,9 @@ class AdCleanerApp:
                                    "filled in for you. Add the pairing code if "
                                    "this is the first time.")
             elif not (found["connect"] or found["pairing"]):
-                status.config(text="Couldn't find the phone automatically — check "
-                                   "Wireless debugging is ON, or type the "
+                status.config(text="Couldn't find the phone automatically — make "
+                                   "sure Wireless debugging is ON and the phone's "
+                                   "screen is on and unlocked, or type the "
                                    "addresses from the phone's screen.")
 
         def scan():

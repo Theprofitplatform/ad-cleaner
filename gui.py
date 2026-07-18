@@ -1494,6 +1494,10 @@ class AdCleanerApp:
         if a.used_min:
             lines.append("")
             lines.append(f"Used about {a.used_min} min recently")
+        if a.notif_titles:
+            lines.append("")
+            lines.append("Notifications it's showing:  "
+                         + " | ".join(f"“{t}”" for t in a.notif_titles[:3]))
         if STALKER_REASON in a.reasons:
             lines.append("")
             lines.append("⚠ This looks like a hidden tracking app. Ask the customer "

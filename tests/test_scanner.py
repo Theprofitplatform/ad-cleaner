@@ -55,6 +55,8 @@ class FakeAdb:
             return fx("netstats.txt")
         if args == ["dumpsys", "usagestats"]:
             return fx("usagestats.txt")
+        if args == ["settings", "get", "secure", "enabled_notification_listeners"]:
+            return "com.random.freegift/com.random.freegift.NLService"
         # Real device subcommand is `get-role-holders` (NOT `holders`); serving it
         # only under the correct name catches a regression to the broken command.
         if args[:3] == ["cmd", "role", "get-role-holders"]:
@@ -344,6 +346,33 @@ def test_notif_spam_scored():
               first_install=datetime(2020, 1, 1), notif_count=5)
     score_app(app, NOW)
     assert scanner.REASONS["notif_spam"] in app.reasons
+
+
+def test_parse_notification_titles():
+    titles = scanner.parse_notification_titles(fx("dumpsys_notification.txt"))
+    # deduped, first-seen order, nested parens kept intact
+    assert titles["com.random.freegift"] == [
+        "You won a FREE gift!", "Your phone is infected (2 viruses)"]
+    assert titles["com.whatsapp"] == ["Mum"]
+    assert scanner.parse_notification_titles("") == {}
+
+
+def test_notif_listener_scored():
+    app = App(package="com.random.freegift", installer="com.android.vending",
+              first_install=datetime(2020, 1, 1), notif_listener=True)
+    score_app(app, NOW)
+    assert scanner.REASONS["notif_listener"] in app.reasons
+    assert app.score >= scanner.WEIGHTS["notif_listener"]
+
+
+def test_build_inventory_attaches_notification_signals():
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    freegift = apps["com.random.freegift"]
+    assert freegift.notif_count == 5
+    assert freegift.notif_listener  # FakeAdb enables its listener service
+    assert "You won a FREE gift!" in freegift.notif_titles
+    assert not apps["com.spotify.music"].notif_listener
+    assert apps["com.spotify.music"].notif_titles == []
 
 
 def test_build_inventory_attaches_data_use():

@@ -111,6 +111,13 @@ def test_parse_first_install():
     dt = parse_first_install(fx("dumpsys_com.random.freegift.txt"))
     assert dt == datetime(2024, 5, 20, 14, 22, 10)
     assert parse_first_install("no date here") is None
+    # factory preloads report the epoch -> unknown, not "installed 1970-01-01"
+    assert parse_first_install("firstInstallTime=1970-01-01 09:59:59") is None
+
+
+def test_known_labels_beat_last_segment_guess():
+    assert scanner.prettify_label("org.telegram.messenger").startswith("Telegram ")
+    assert scanner.prettify_label("ai.perplexity.app.android").startswith("Perplexity ")
 
 
 def test_parse_perms():

@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 
 from device import parse_data_use, parse_usage_minutes
 from protected import (
-    extend_blocklist, is_blocked, is_protected, is_spoof, looks_like_junk,
-    reset_blocklist,
+    extend_blocklist, is_blocked, is_from_known_store, is_protected, is_spoof,
+    looks_like_junk, reset_blocklist,
 )
 from stalkerware import is_stalkerware
 
@@ -155,6 +155,9 @@ class App:
 # Names a customer actually knows, for packages whose id guesses wrong
 # ("Katana" is Facebook) plus the system processes that top the hog lists.
 # ponytail: curated dict, not manifest parsing — extend as odd ones show up.
+# DOUBLES AS THE TRUSTED-BRAND LIST: a package listed here + installed from a
+# real store gets its everyday signals (SMS/contacts, boot start, self-update)
+# waived in score_app — only add household names you'd vouch for.
 KNOWN_LABELS = {
     "com.facebook.katana": "Facebook",
     "com.facebook.orca": "Messenger",
@@ -188,6 +191,16 @@ KNOWN_LABELS = {
     "com.openai.chatgpt": "ChatGPT",                # guessed "Chatgpt"
     "com.americanexpress.android.acctsvcs.au": "American Express",  # guessed "Au"
     "com.google.android.aicore": "Android AI Core",
+    # Household apps seen scoring Medium on live phones (permission noise) or
+    # showing a junk last-segment label ("Mediaclient", "Number", "Gss"):
+    "com.netflix.mediaclient": "Netflix",
+    "com.pinterest": "Pinterest",
+    "com.depop": "Depop",
+    "com.ecosia.android": "Ecosia browser",
+    "com.amazon.mShop.android.shopping": "Amazon Shopping",
+    "com.einnovation.temu": "Temu",
+    "au.com.kmart": "Kmart",
+    "au.com.vodafone.mobile.gss": "My Vodafone",
 }
 
 
@@ -410,6 +423,14 @@ def score_app(app, now):
         "boot_receiver": app.boot_receiver,
         "notif_listener": app.notif_listener,
     }
+    if app.package in KNOWN_LABELS and is_from_known_store(app.installer):
+        # Household-name app from a real store: SMS/contacts access, boot
+        # start, self-update and fresh installs are its job, not a signal.
+        # Dangerous signals (overlay, hidden, admin, accessibility, role
+        # hijack, notif listener) still count in full.
+        for k in ("request_install", "sensitive_data", "boot_receiver",
+                  "recent_install", "notif_spam"):
+            signals[k] = False
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
     if app.hijacked_roles:  # name the specific defaults it seized

@@ -76,6 +76,8 @@ def test_looks_like_junk():
     # A legit app that merely contains 'wrapper' must NOT be flagged (bet365's
     # official package is com.bet365Wrapper.Bet365_Application).
     assert not looks_like_junk("com.bet365Wrapper.Bet365_Application")
+    # Third-party flashlight apps are the classic ad vector.
+    assert looks_like_junk("com.peacock.flashlight")
 
 
 def test_junk_named_system_lookalike_is_not_protected():
@@ -88,6 +90,11 @@ def test_junk_named_system_lookalike_is_not_protected():
 
 def test_blocklist():
     assert is_blocked("com.cleanmaster.mguard")          # bundled seed
+    # 2026-07 field family (hidden apps + droppers found on a live phone)
+    assert is_blocked("com.maxfree.cjsi")
+    assert is_blocked("com.zapzip.biger")
+    assert is_blocked("com.alfacln.jkclnr")
+    assert is_blocked("com.protect.permission.appmanage.guard")
     assert not is_blocked("com.spotify.music")
     extend_blocklist(["com.some.fake.app", "# a comment", "  ",
                       "com.inline.commented   # trailing note"])

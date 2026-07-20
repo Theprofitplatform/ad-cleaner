@@ -233,12 +233,19 @@ def test_prettify_label_uses_known_names():
     assert prettify_label("com.zhiliaoapp.musically") == "TikTok (com.zhiliaoapp.musically)"
 
 
-@pytest.mark.parametrize("pkg", ["com.a.xkwptqzr", "com.a.a8f3k2j9x"])
+@pytest.mark.parametrize("pkg", [
+    "com.a.xkwptqzr", "com.a.a8f3k2j9x",
+    "com.alfacln.jkclnr",     # live sample: 6-letter zero-vowel segment
+])
 def test_looks_random_true(pkg):
     assert looks_random(pkg)
 
 
-@pytest.mark.parametrize("pkg", ["com.spotify.music", "com.foo.flashlight", "com.whatsapp"])
+@pytest.mark.parametrize("pkg", [
+    "com.spotify.music", "com.foo.flashlight", "com.whatsapp",
+    "com.telstra.nrl",        # short vowel-less segments stay legit (< 5 letters)
+    "com.samsung.SMT.lang_en_us_g02",
+])
 def test_looks_random_false(pkg):
     assert not looks_random(pkg)
 

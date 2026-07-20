@@ -23,7 +23,9 @@ WEIGHTS = {
     "hidden": 20,              # installed but has no icon in the app drawer
     "device_admin": 20,        # active device administrator
     "recent_install": 15,      # first installed within RECENT_DAYS
-    "role_hijack": 15,         # took over a system default (home/browser/sms/dialer)
+    "role_hijack": 40,         # took over a system default (home/browser/sms/dialer)
+                               # — never innocent; alone it must clear the Medium bar
+                               # (field: gibberish launcher scored 15 and hid as Low)
     "request_install": 10,     # holds REQUEST_INSTALL_PACKAGES
     "accessibility": 10,       # holds a BIND_ACCESSIBILITY_SERVICE grant (declared only)
     "sensitive_data": 10,      # can read SMS / call log / contacts
@@ -369,7 +371,7 @@ def looks_random(package):
         if not seg.isalnum():
             continue
         letters = [c for c in seg.lower() if c.isalpha()]
-        vowels = sum(c in "aeiou" for c in letters)
+        vowels = sum(c in "aeiouy" for c in letters)  # y counts: "rhythm" is a word, "jkclnr" isn't
         if len(seg) >= 5 and letters and vowels == 0:
             return True  # consonant soup ("jkclnr"); no real word is this dry
         if len(seg) < 8:

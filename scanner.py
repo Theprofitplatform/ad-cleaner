@@ -366,15 +366,18 @@ def looks_random(package):
     ponytail: heuristic, tune WEIGHTS/here if it mislabels; not a classifier.
     """
     for seg in package.split("."):
-        if len(seg) < 8 or not seg.isalnum():
+        if not seg.isalnum():
             continue
         letters = [c for c in seg.lower() if c.isalpha()]
+        vowels = sum(c in "aeiou" for c in letters)
+        if len(seg) >= 5 and letters and vowels == 0:
+            return True  # consonant soup ("jkclnr"); no real word is this dry
+        if len(seg) < 8:
+            continue
         if any(c.isdigit() for c in seg) and letters:
             return True
-        if letters:
-            vowels = sum(c in "aeiou" for c in letters)
-            if vowels / len(letters) < 0.2:  # ponytail: consonant-heavy = gibberish
-                return True
+        if letters and vowels / len(letters) < 0.2:  # ponytail: consonant-heavy = gibberish
+            return True
     return False
 
 

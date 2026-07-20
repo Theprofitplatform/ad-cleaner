@@ -58,6 +58,7 @@ PROTECTED_EXACT = frozenset({
 # (e.g. "speed" is omitted so Ookla Speedtest isn't flagged).
 JUNK_WORDS = (
     "clean", "boost", "optimize", "speedup", "junk", "antivirus",
+    "flashlight",   # third-party flashlight apps are a classic ad vector; OEM torches are protected
 )
 
 # Known-bad package ids (exact match) -> forced HIGH. Seed of notorious
@@ -70,6 +71,12 @@ _SEED_BLOCKLIST = frozenset({
     "com.dianxinos.optimizer.duplay",   # DU Speed Booster
     "com.qihoo.security",               # 360 Security
     "com.ijinshan.kbatterydoctor_en",   # Battery Doctor
+    # Adware family caught live on a customer phone, 2026-07 (hidden apps +
+    # random-name droppers installed together via Play Store):
+    "com.maxfree.cjsi",
+    "com.zapzip.biger",
+    "com.alfacln.jkclnr",
+    "com.protect.permission.appmanage.guard",
 })
 _BLOCKLIST = set(_SEED_BLOCKLIST)
 

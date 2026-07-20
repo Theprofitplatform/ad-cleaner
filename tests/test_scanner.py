@@ -201,7 +201,17 @@ def test_role_hijack_scored_with_named_defaults():
               hijacked_roles=["home screen", "browser"], first_install=datetime(2020, 1, 1))
     score_app(app, NOW)
     assert any("Took over a system default (home screen, browser)" in r for r in app.reasons)
-    assert app.score == 40  # sideloaded 25 + role_hijack 15
+    assert app.score == 65  # sideloaded 25 + role_hijack 40
+    assert app.risk == "HIGH"
+
+
+def test_role_hijack_alone_is_medium():
+    # Field case (moto g35): gibberish launcher held the HOME role but had no
+    # other signal, scored 15 and hid behind the risky-only filter as Low.
+    app = App(package="com.teacher.sim.passorno.vnoqw", installer="com.android.vending",
+              hijacked_roles=["home screen"], first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert app.risk == "Medium"
 
 
 def test_nuisance_cleaner_from_store_is_medium():
@@ -244,6 +254,7 @@ def test_looks_random_true(pkg):
 @pytest.mark.parametrize("pkg", [
     "com.spotify.music", "com.foo.flashlight", "com.whatsapp",
     "com.telstra.nrl",        # short vowel-less segments stay legit (< 5 letters)
+    "com.rhythm.hop.tiles.ball.music.game",  # y counts as a vowel ("rhythm")
     "com.samsung.SMT.lang_en_us_g02",
 ])
 def test_looks_random_false(pkg):

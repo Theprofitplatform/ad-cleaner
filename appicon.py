@@ -102,7 +102,9 @@ def device_icon(adb, package):
                 if l.strip().startswith("package:")), None)
     if not apk:
         return None
-    with tempfile.TemporaryDirectory() as tmp:
+    # ignore_cleanup_errors: closing the app mid-pull leaves adb.exe holding
+    # base.apk; without this the shutdown finalizer tracebacks (WinError 32).
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         local = str(Path(tmp) / "base.apk")
         try:
             adb.pull(apk, local)

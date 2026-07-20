@@ -214,6 +214,33 @@ def test_role_hijack_alone_is_medium():
     assert app.risk == "Medium"
 
 
+def test_trusted_brand_from_store_waives_everyday_signals():
+    # Field case (moto g35): WhatsApp scored 30 Medium off install-apps +
+    # SMS/contacts + boot receiver — all its job. Trusted + store = 0.
+    app = App(package="com.whatsapp", installer="com.android.vending",
+              request_install=True, sensitive_data=True, boot_receiver=True,
+              first_install=NOW)
+    score_app(app, NOW)
+    assert app.score == 0 and app.risk == "Low" and app.reasons == []
+
+
+def test_trusted_brand_sideloaded_gets_no_waiver():
+    # Trust needs a real store: a sideloaded "WhatsApp" keeps every signal.
+    app = App(package="com.whatsapp", installer=None,
+              request_install=True, sensitive_data=True, boot_receiver=True,
+              first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert app.score == 55 and app.risk == "HIGH"  # sideloaded 25 + 10*3
+
+
+def test_trusted_brand_keeps_dangerous_signals():
+    # The waiver never covers overlay/hidden/hijack-class signals.
+    app = App(package="com.whatsapp", installer="com.android.vending",
+              overlay=True, hidden=True, first_install=datetime(2020, 1, 1))
+    score_app(app, NOW)
+    assert app.score == 60 and app.risk == "HIGH"  # overlay 40 + hidden 20
+
+
 def test_nuisance_cleaner_from_store_is_medium():
     # A Play-Store cleaner with no dangerous perms would otherwise score 0.
     app = App(package="com.phone.cleaner.shineapps", installer="com.android.vending",

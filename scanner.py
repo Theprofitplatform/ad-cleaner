@@ -163,6 +163,7 @@ KNOWN_LABELS = {
     "com.facebook.orca": "Messenger",
     "com.facebook.lite": "Facebook Lite",
     "com.instagram.android": "Instagram",
+    "com.instagram.barcelona": "Threads",           # real pkg id (Meta's codename)
     "com.zhiliaoapp.musically": "TikTok",
     "com.ss.android.ugc.trill": "TikTok",
     "com.whatsapp": "WhatsApp",
@@ -202,6 +203,17 @@ KNOWN_LABELS = {
     "au.com.kmart": "Kmart",
     "au.com.vodafone.mobile.gss": "My Vodafone",
 }
+
+# First-party self-updaters that deliver genuine household apps but AREN'T app
+# stores: Meta's app-manager preinstalls/updates WhatsApp/Instagram/Threads/
+# Facebook on Samsung phones, so their installer is com.facebook.system, not
+# Play Store -- and the brand waiver would otherwise miss every Meta app.
+# ponytail: waiver-only. Kept out of protected.KNOWN_STORES on purpose so it
+# can't widen spoof/genuine-system trust -- extend only for names in KNOWN_LABELS.
+BRAND_UPDATERS = frozenset({
+    "com.facebook.system",
+    "com.facebook.appmanager",
+})
 
 
 def prettify_label(package):
@@ -423,7 +435,9 @@ def score_app(app, now):
         "boot_receiver": app.boot_receiver,
         "notif_listener": app.notif_listener,
     }
-    if app.package in KNOWN_LABELS and is_from_known_store(app.installer):
+    if app.package in KNOWN_LABELS and (
+            is_from_known_store(app.installer)
+            or app.installer in BRAND_UPDATERS):
         # Household-name app from a real store: SMS/contacts access, boot
         # start, self-update and fresh installs are its job, not a signal.
         # Dangerous signals (overlay, hidden, admin, accessibility, role
@@ -613,6 +627,15 @@ def demo():
                   first_install=datetime(2020, 1, 1))
     score_app(blocked, now)
     assert blocked.risk == "HIGH" and BLOCKED_REASON in blocked.reasons
+
+    # Genuine Meta app updated by Meta's app-manager (not Play Store): brand
+    # waiver still fires, so everyday perms don't score it -> Low.
+    wa = App(package="com.whatsapp", installer="com.facebook.system",
+             request_install=True, sensitive_data=True, boot_receiver=True,
+             first_install=datetime(2024, 2, 28))  # also recent -> waived
+    score_app(wa, now)
+    assert wa.risk == "Low", (wa.score, wa.reasons)
+    assert prettify_label("com.instagram.barcelona").startswith("Threads")
 
     owners = parse_owners("Device Owner:\n  admin=ComponentInfo{com.mdm.x/.A}\n")
     assert owners == {"device": "com.mdm.x", "profile": None}

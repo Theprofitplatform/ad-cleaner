@@ -31,7 +31,9 @@ WEIGHTS = {
     "sensitive_data": 10,      # can read SMS / call log / contacts
     "random_name": 10,         # package name has a random-looking segment
     "nuisance": 30,            # junk cleaner/booster/optimizer or fake-app name
-    "notif_spam": 10,          # floods the notification shade
+    "notif_spam": 30,          # floods the notification shade -- alone clears the
+                               # Medium bar so ad-notification apps surface on their
+                               # own (waived for trusted brands; see score_app)
     "boot_receiver": 10,       # restarts itself on every reboot (RECEIVE_BOOT_COMPLETED)
     "notif_listener": 25,      # notification listener is switched ON (reads every notification)
 }

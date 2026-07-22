@@ -343,6 +343,28 @@ def test_reset_data_from_detail(root, monkeypatch, tmp_path):
     assert ["pm", "clear", "--user", "0", "com.random.adware"] in app.adb.calls
 
 
+def test_flag_app_toggles_blocklist(root, monkeypatch, tmp_path):
+    import adb as adb_mod
+    import scanner
+    monkeypatch.setattr(adb_mod, "data_dir", lambda: tmp_path)  # don't touch real file
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.5)
+    app.suspicious_var.set(False)
+    app._render_table()
+    app.tree.selection_set("com.random.adware")
+    app._on_select()
+    pump(root, 0.1)
+    app.on_toggle_blocklist()                       # 🚩 flag it
+    pump(root, 0.2)
+    assert "com.random.adware" in (tmp_path / "blocklist.txt").read_text()
+    assert scanner.BLOCKED_REASON in app._app_by_pkg("com.random.adware").reasons
+    app.on_toggle_blocklist()                       # unflag it
+    pump(root, 0.2)
+    assert scanner.BLOCKED_REASON not in app._app_by_pkg("com.random.adware").reasons
+    scanner.reset_blocklist()                       # keep the shared process clean
+
+
 def test_block_notifications_from_detail(root, monkeypatch, tmp_path):
     _wire(gui, monkeypatch, tmp_path)
     app = gui.AdCleanerApp(root)

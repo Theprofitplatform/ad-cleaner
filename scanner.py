@@ -499,6 +499,26 @@ def _load_user_blocklist():
             pass
 
 
+def set_blocklisted(package, blocked):
+    """Add or remove `package` in the user blocklist.txt, then reload the live
+    blocklist. Returns the resulting blocked state (is_blocked). Idempotent, and
+    preserves comments/other entries. A seed-listed id can't be unblocked here --
+    the bundled seed always applies -- so the return value tells the caller the
+    real outcome.
+    """
+    from adb import data_dir
+    path = data_dir() / "blocklist.txt"
+    lines = (path.read_text(encoding="utf-8-sig").splitlines()
+             if path.exists() else [])
+    kept = [ln for ln in lines if ln.split("#", 1)[0].strip() != package]
+    if blocked:
+        kept.append(package)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    _load_user_blocklist()
+    return is_blocked(package)
+
+
 def build_inventory(adb, progress=None, now=None):
     """Scan the connected device and return scored Apps, highest risk first."""
     now = now or datetime.now()

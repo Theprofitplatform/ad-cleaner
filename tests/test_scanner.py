@@ -400,6 +400,23 @@ def test_notif_spam_scored():
     assert scanner.REASONS["notif_spam"] in app.reasons
 
 
+def test_notif_spam_alone_reaches_medium():
+    # Otherwise-clean Play Store app that only floods notifications -> Medium on
+    # its own (notif_spam weight == MEDIUM_THRESHOLD).
+    app = App(package="com.some.adnews", installer="com.android.vending",
+              first_install=datetime(2020, 1, 1), notif_count=5)
+    score_app(app, NOW)
+    assert app.risk == "Medium", (app.score, app.reasons)
+
+
+def test_notif_spam_waived_for_trusted_brand():
+    # A household name from a real store still gets its notif spam waived.
+    app = App(package="com.whatsapp", installer="com.android.vending",
+              first_install=datetime(2020, 1, 1), notif_count=9)
+    score_app(app, NOW)
+    assert app.risk == "Low", (app.score, app.reasons)
+
+
 def test_parse_notification_titles():
     titles = scanner.parse_notification_titles(fx("dumpsys_notification.txt"))
     # deduped, first-seen order, nested parens kept intact

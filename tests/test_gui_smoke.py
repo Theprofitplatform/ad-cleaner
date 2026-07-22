@@ -315,13 +315,18 @@ def test_select_all_then_bulk_pause(root, monkeypatch, tmp_path):
     app.apps = [a1, a2]
     app.suspicious_var.set(False)
     app._render_table()
-    app.on_select_all()                       # ticks every visible row
+    app.on_select_all()                       # ticks every visible row's check box
     pump(root, 0.1)
-    assert set(app.tree.selection()) == {"com.junk.one", "com.junk.two"}
-    app.on_pause()                            # bulk pause the whole selection
+    assert app._checked == {"com.junk.one", "com.junk.two"}
+    assert app.tree.set("com.junk.one", "check") == gui.CHECK_ON
+    app.on_pause()                            # bulk pause every ticked app
     pump(root, 1.0)
     assert "com.junk.one" in app.adb.disabled
     assert "com.junk.two" in app.adb.disabled
+    # on_select_all again clears the ticks (toggle)
+    app.on_select_all()
+    pump(root, 0.1)
+    assert app._checked == set()
 
 
 def test_reset_data_from_detail(root, monkeypatch, tmp_path):

@@ -43,7 +43,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.7.4"
+APP_VERSION = "1.7.5"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -78,10 +78,11 @@ DOT = {"grey": "#94a3b8", "orange": "#f59e0b", "green": "#22c55e"}
 BANNER = {"info": (PANEL, SLATE), "warn": ("#fef3c7", "#92400e"),
           "alert": ("#fee2e2", "#991b1b"), "good": ("#dcfce7", "#166534")}
 STATUS_FG = {"info": INK, "good": GREEN_HOT, "error": RED}
-COLUMNS = ("app", "package", "risk", "why", "installed", "source", "status")
-HEADINGS = ("App name", "App ID", "Risk", "Why flagged", "Installed", "Source", "Status")
-# Show plain-English columns first (name, verdict, reason); techie ones trail.
-DISPLAY = ("app", "risk", "why", "status", "installed", "source", "package")
+COLUMNS = ("check", "app", "package", "risk", "why", "installed", "source", "status")
+HEADINGS = ("", "App name", "App ID", "Risk", "Why flagged", "Installed", "Source", "Status")
+# Check box leads; then plain-English columns (name, verdict, reason); techie ones trail.
+DISPLAY = ("check", "app", "risk", "why", "status", "installed", "source", "package")
+CHECK_ON, CHECK_OFF = "☑", "☐"
 SUSPICIOUS = {"HIGH", "Medium"}
 
 STOP_ALL_MSG = ("This will close every downloaded app on the phone.\n\n"
@@ -215,6 +216,7 @@ class AdCleanerApp:
         self.android = ""
         self.apps = []
         self.selected = None
+        self._checked = set()   # package ids ticked via the check-box column
         self._last_transfer_dir = None  # set after a Step-1 save this session
         self.log = ActionLog()
         self.ui_queue = queue.Queue()
@@ -467,10 +469,12 @@ class AdCleanerApp:
         # techie App ID / Source trail behind so a nervous user reads meaning first.
         self.tree = ttk.Treeview(mid, columns=COLUMNS, displaycolumns=DISPLAY,
                                  show="headings", selectmode="extended")
-        widths = (190, 150, 112, 240, 92, 120, 84)  # COLUMNS order; 'why' flexes
+        widths = (34, 190, 150, 112, 240, 92, 120, 84)  # COLUMNS order; 'why' flexes
         for col, head, w in zip(COLUMNS, HEADINGS, widths):
             self.tree.heading(col, text=head)
-            self.tree.column(col, width=w, anchor="w", stretch=(col == "why"))
+            self.tree.column(col, width=w, minwidth=w if col == "check" else 20,
+                             anchor="center" if col == "check" else "w",
+                             stretch=(col == "why"))
         self.tree_empty = ttk.Label(mid, style="Muted.TLabel", anchor="center",
                                     font=(FONT, 12), justify="center")
         for risk in RISK_BG:
@@ -484,6 +488,7 @@ class AdCleanerApp:
         mid.rowconfigure(0, weight=1)
         mid.columnconfigure(0, weight=1)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<Button-1>", self._toggle_check)  # click the box column to tick
         self.tree.bind("<Delete>", lambda e: self.on_uninstall())
         self.tree.bind("<Button-3>", self._popup_menu)
         self._row_menu = tk.Menu(self.tree, tearoff=0)
@@ -1470,13 +1475,18 @@ class AdCleanerApp:
                                if len(a.reasons) > 1 else "")) if a.reasons else ""
         name = ("🔒 " if a.protected else "") + a.label.split(" (")[0]
         risk = f"{RISK_DOT.get(a.risk, '')} {a.risk} ({a.score})"
-        return (name, a.package, risk, why, installed, a.source, a.status)
+        box = CHECK_ON if a.package in self._checked else CHECK_OFF
+        return (box, name, a.package, risk, why, installed, a.source, a.status)
 
     def _render_table(self):
         self.tree.delete(*self.tree.get_children())
+        # Drop ticks for apps that no longer exist (uninstalled / new scan); keep
+        # ticks for rows merely hidden by the filter so the filter doesn't lose them.
+        self._checked &= {a.package for a in self.apps}
         for a in self._visible_apps():
             self.tree.insert("", "end", iid=a.package, tags=(a.risk,),
                              values=self._row_values(a))
+        self._update_bulk_labels()
         # Never leave a blank grid — a clean phone must not look like a failure.
         if self.tree.get_children():
             self.tree_empty.place_forget()
@@ -1527,15 +1537,45 @@ class AdCleanerApp:
         self.selected = self._app_by_pkg(sel[0]) if sel else None
         self._update_detail()
 
+    def _toggle_check(self, event):
+        """Click in the check-box column ticks/unticks that row (leaves the
+        highlighted row and details panel untouched)."""
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            return
+        if self.tree.identify_column(event.x) != "#1":  # check is display column #1
+            return
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self._checked.symmetric_difference_update({row})
+        self.tree.set(row, "check", CHECK_ON if row in self._checked else CHECK_OFF)
+        self._update_bulk_labels()
+        return "break"  # don't also move the selection/details to this row
+
+    def _update_bulk_labels(self):
+        """Show the ticked count on the bulk buttons so it's obvious what will act."""
+        n = len(self._checked)
+        tag = f" ({n})" if n else ""
+        self.bulk_pause_btn.config(text=f"⏸  Pause{tag}")
+        self.bulk_uninstall_btn.config(text=f"🗑  Uninstall{tag}")
+
     def on_select_all(self):
-        """Tick every row currently shown in the table (respects the active filter)."""
+        """Toggle: tick every visible row, or clear all if they're already ticked
+        (respects the active filter)."""
         items = self.tree.get_children()
         if not items:
             return
-        self.tree.selection_set(items)
-        self.tree.focus(items[0])
-        self._on_select()
-        self.status_line(f"Selected {len(items)} app(s). Press Pause or Uninstall.", "info")
+        all_ticked = all(i in self._checked for i in items)
+        for i in items:
+            if all_ticked:
+                self._checked.discard(i)
+            else:
+                self._checked.add(i)
+            self.tree.set(i, "check", CHECK_OFF if all_ticked else CHECK_ON)
+        self._update_bulk_labels()
+        verb = "Cleared" if all_ticked else "Ticked"
+        self.status_line(f"{verb} {len(items)} app(s)." +
+                         ("" if all_ticked else " Press Pause or Uninstall."), "info")
 
     def _clear_detail(self):
         self.selected = None
@@ -1680,7 +1720,9 @@ class AdCleanerApp:
         """Non-protected apps currently selected in the table (multi-select aware)."""
         if not self.serial or self.busy:
             return []
-        ids = self.tree.selection()
+        # Ticked boxes are the explicit target; fall back to the highlighted
+        # row(s) so right-click / Delete on a single row still works.
+        ids = [i for i in self._checked if self._app_by_pkg(i)] or self.tree.selection()
         apps = ([self._app_by_pkg(i) for i in ids] if ids
                 else ([self.selected] if self.selected else []))
         apps = [a for a in apps if a]

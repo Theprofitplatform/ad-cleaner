@@ -373,6 +373,21 @@ def test_user_blocklist_file_loaded_and_deletions_apply(tmp_path):
     assert scanner.BLOCKED_REASON not in apps["com.random.freegift"].reasons
 
 
+def test_set_blocklisted_add_and_remove(tmp_path):
+    # Flag: writes the id and forces HIGH on the next scan.
+    assert scanner.set_blocklisted("com.junk.game", True) is True
+    apps = {a.package: a for a in build_inventory(FakeAdb(), now=NOW)}
+    # (com.junk.game isn't on the fake device, but the file state is what matters)
+    assert "com.junk.game" in (tmp_path / "blocklist.txt").read_text()
+    # Unflag: removes it, and other lines/comments survive.
+    (tmp_path / "blocklist.txt").write_text(
+        "# keep me\ncom.junk.game\ncom.other.bad\n", encoding="utf-8")
+    assert scanner.set_blocklisted("com.junk.game", False) is False
+    body = (tmp_path / "blocklist.txt").read_text()
+    assert "com.junk.game" not in body
+    assert "# keep me" in body and "com.other.bad" in body
+
+
 def test_unreadable_blocklist_file_does_not_kill_the_scan(tmp_path):
     # A UTF-16 file (PowerShell's default '>>' encoding) must be skipped, not
     # crash build_inventory with UnicodeDecodeError.

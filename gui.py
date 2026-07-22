@@ -32,7 +32,11 @@ from battery import read_battery_report, summarize as battery_summarize
 from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
                     read_resource_report)
 from report import render_history_html, render_intake_html, render_receipt_html
-from scanner import KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory, parse_owners
+from protected import is_blocked
+from scanner import (
+    KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory, parse_owners,
+    score_app, set_blocklisted,
+)
 from setup_helper import download_platform_tools
 from stalkerware import UPDATED as STALKER_UPDATED
 
@@ -43,7 +47,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.7.6"
+APP_VERSION = "1.7.7"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -496,7 +500,8 @@ class AdCleanerApp:
                          ("🗑  Uninstall", self.on_uninstall), (None, None),
                          ("↺  Reset data", self.on_reset_data),
                          ("💾  Backup APK", self.on_backup_apk),
-                         ("📋  Copy app ID", self._copy_pkg)):
+                         ("📋  Copy app ID", self._copy_pkg), (None, None),
+                         ("🚩  Flag as bad app", self.on_toggle_blocklist)):
             if lbl is None:
                 self._row_menu.add_separator()
             else:
@@ -1951,10 +1956,34 @@ class AdCleanerApp:
         if row and row not in self.tree.selection():
             self.tree.selection_set(row)
         self._on_select()
+        # "Flag" toggles: show the opposite of the app's current blocklist state.
+        flagged = bool(self.selected) and is_blocked(self.selected.package)
+        self._row_menu.entryconfigure(
+            "end", label="🚩  Unflag (remove from blocklist)" if flagged
+            else "🚩  Flag as bad app")
         try:
             self._row_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._row_menu.grab_release()
+
+    def on_toggle_blocklist(self):
+        """Add/remove the right-clicked app in the user blocklist.txt, so the
+        operator can force it to HIGH (or clear it) without editing a file."""
+        a = self.selected
+        if not a:
+            return
+        now_blocked = set_blocklisted(a.package, not is_blocked(a.package))
+        for app in self.apps:      # blocklist changed -> re-score + redraw
+            score_app(app, datetime.now())
+        self._render_table()       # clears tree selection -> restore it so the
+        if self.tree.exists(a.package):   # details panel stays put and a repeat
+            self.tree.selection_set(a.package)  # toggle still has a target
+        self._update_detail()
+        name = a.label.split(" (")[0]
+        self.status_line(
+            f"{'🚩 Flagged' if now_blocked else 'Unflagged'} {name}. "
+            + ("Now forced to HIGH." if now_blocked
+               else "No longer force-flagged."), "info")
 
     def _do_action(self, fn, app, verb, removes=False):
         self.busy = True

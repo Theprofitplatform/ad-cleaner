@@ -298,6 +298,14 @@ def test_block_browser_popups_hits_only_installed_browsers(log):
     assert sum(1 for e in log.recent() if e["action"] == "block-notifications") == 2
 
 
+def test_block_browser_popups_covers_third_party_browsers(log):
+    # Brave/Edge/Opera etc. carry the same site-push scams -> now covered.
+    adb = FakeAdb()
+    adb.installed.update({"com.brave.browser", "com.microsoft.emmx"})
+    done = actions.block_browser_popups(adb, log)
+    assert set(done) == {"Brave", "Microsoft Edge"}
+
+
 def test_will_clean_ignores_play_not_listed_reason_in_nuisance_fence():
     # The Play-lookup feature appends NOT_LISTED_REASON to a.reasons for
     # display. That must not defeat the nuisance-only fence (Fix 1).

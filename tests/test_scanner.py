@@ -432,6 +432,35 @@ def test_notif_spam_waived_for_trusted_brand():
     assert app.risk == "Low", (app.score, app.reasons)
 
 
+def test_sample_notifications_takes_peak_and_union():
+    # A bursty spammer: 1 notification, then 3 (with new titles), then quiet.
+    dumps = [
+        "NotificationRecord(0x1: pkg=com.spam.ads)\n"
+        "  android.title=String (Buy now!)\n",
+        "NotificationRecord(0x2: pkg=com.spam.ads)\n"
+        "  android.title=String (Cheap pills)\n"
+        "NotificationRecord(0x3: pkg=com.spam.ads)\n"
+        "  android.title=String (Win a prize)\n"
+        "NotificationRecord(0x4: pkg=com.spam.ads)\n"
+        "  android.title=String (Buy now!)\n",
+        "",  # momentarily empty -- a single snapshot here would score it 0
+    ]
+
+    class SeqAdb:
+        def __init__(self):
+            self.i = 0
+
+        def shell_text(self, args, timeout=10):
+            d = dumps[min(self.i, len(dumps) - 1)]
+            self.i += 1
+            return d
+
+    counts, titles = scanner._sample_notifications(
+        SeqAdb(), samples=3, interval=0, sleep=lambda _s: None)
+    assert counts["com.spam.ads"] == 3          # peak, not the last (empty) read
+    assert titles["com.spam.ads"] == ["Buy now!", "Cheap pills", "Win a prize"]
+
+
 def test_parse_notification_titles():
     titles = scanner.parse_notification_titles(fx("dumpsys_notification.txt"))
     # deduped, first-seen order, nested parens kept intact

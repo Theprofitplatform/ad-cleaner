@@ -164,7 +164,7 @@ def _wire(gui_mod, monkeypatch, tmp_path, adb_cls=FakeAdb):
             a.enabled = a.package not in adb.disabled
         return apps
     monkeypatch.setattr(gui_mod, "build_inventory",
-                        lambda adb, progress=None, now=None: _inventory(adb))
+                        lambda adb, progress=None, now=None, notif_samples=1: _inventory(adb))
     monkeypatch.setattr(gui_mod.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(gui_mod.messagebox, "showinfo", lambda *a, **k: None)
     monkeypatch.setattr(gui_mod.webbrowser, "open", lambda *a, **k: None)

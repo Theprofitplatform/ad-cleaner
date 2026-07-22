@@ -5,6 +5,7 @@ Pure parse/score functions (tested against fixtures) plus a thin
 """
 
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -103,6 +104,8 @@ HIGH_THRESHOLD = 55
 MEDIUM_THRESHOLD = 30
 RECENT_DAYS = 30
 NOISY_THRESHOLD = 5        # active notifications at scan time -> "notif_spam" signal
+NOTIF_SAMPLES = 4          # how many times a live scan reads the shade (peak wins)
+NOTIF_INTERVAL = 1.2       # seconds between those reads (~3.6s window total)
 # ---------------------------------------------------------------------------
 
 
@@ -519,8 +522,34 @@ def set_blocklisted(package, blocked):
     return is_blocked(package)
 
 
-def build_inventory(adb, progress=None, now=None):
-    """Scan the connected device and return scored Apps, highest risk first."""
+def _sample_notifications(adb, samples=1, interval=NOTIF_INTERVAL, sleep=None):
+    """Read the notification shade `samples` times, `interval`s apart, and return
+    (peak_count_per_pkg, union_of_titles). A single snapshot misses a spammer
+    that's momentarily quiet; the peak over a short window catches it.
+    ponytail: peak+union over a few seconds, no persistent listener -- so ad
+    pushes that fire minutes apart still need a scan while they're showing. A
+    real always-on capture would need a NotificationListenerService, which we
+    don't bind. samples<=1 keeps the old one-shot behaviour (and never sleeps).
+    """
+    sleep = sleep or time.sleep
+    counts, titles = {}, {}
+    for n in range(max(1, samples)):
+        if n:
+            sleep(interval)
+        dump = _safe(lambda: adb.shell_text(
+            ["dumpsys", "notification", "--noredact"]))
+        for pkg, c in parse_notification_counts(dump).items():
+            counts[pkg] = max(counts.get(pkg, 0), c)
+        for pkg, ts in parse_notification_titles(dump).items():
+            seen = titles.setdefault(pkg, [])
+            seen.extend(t for t in ts if t not in seen)
+    return counts, titles
+
+
+def build_inventory(adb, progress=None, now=None, notif_samples=1):
+    """Scan the connected device and return scored Apps, highest risk first.
+    notif_samples>1 samples the notification shade repeatedly (see
+    _sample_notifications) so bursty ad-notification apps get caught."""
     now = now or datetime.now()
     _load_user_blocklist()
     installers = parse_third_party(_safe(lambda: adb.shell_text(
@@ -543,10 +572,7 @@ def build_inventory(adb, progress=None, now=None):
         for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
                 ["cmd", "role", "get-role-holders", role]))):
             role_owner.setdefault(pkg, []).append(friendly)
-    notif_dump = _safe(lambda: adb.shell_text(
-        ["dumpsys", "notification", "--noredact"]))
-    notif = parse_notification_counts(notif_dump)
-    notif_titles = parse_notification_titles(notif_dump)
+    notif, notif_titles = _sample_notifications(adb, notif_samples)
     # Same 'pkg/svc:pkg/svc' format as accessibility services -- reuse the parser.
     listeners = parse_enabled_accessibility(_safe(lambda: adb.shell_text(
         ["settings", "get", "secure", "enabled_notification_listeners"])))

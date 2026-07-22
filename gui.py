@@ -34,8 +34,8 @@ from device import (GB, read_battery_report, read_big_files, read_charging, read
 from report import render_history_html, render_intake_html, render_receipt_html
 from protected import is_blocked
 from scanner import (
-    KNOWN_LABELS, ROLE_IDS, STALKER_REASON, build_inventory, parse_owners,
-    score_app, set_blocklisted,
+    KNOWN_LABELS, NOTIF_SAMPLES, ROLE_IDS, STALKER_REASON, build_inventory,
+    parse_owners, score_app, set_blocklisted,
 )
 from setup_helper import download_platform_tools
 from stalkerware import UPDATED as STALKER_UPDATED
@@ -47,7 +47,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.7.7"
+APP_VERSION = "1.7.8"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1421,7 +1421,8 @@ class AdCleanerApp:
         def progress(i, total, pkg):
             self._post(self._scan_progress, i, total)
         try:
-            apps = build_inventory(self.adb, progress=progress)
+            apps = build_inventory(self.adb, progress=progress,
+                                   notif_samples=NOTIF_SAMPLES)
         except Exception as e:
             self._post(self._scan_failed, str(e))
             return

@@ -226,6 +226,10 @@ def prettify_label(package):
     known = KNOWN_LABELS.get(package)
     if known:
         return f"{known} ({package})"
+    # WebAPKs are websites Chrome installed as apps (org.chromium.webapk.<hash>);
+    # the last segment is a hash, so label them for what they are.
+    if package.startswith("org.chromium.webapk."):
+        return f"Website app (Chrome shortcut) ({package})"
     seg = package.split(".")[-1] or package
     return f"{seg[:1].upper()}{seg[1:]} ({package})"
 

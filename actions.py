@@ -369,9 +369,22 @@ def block_install(adb, package, log):
 
 
 # Browsers whose site notifications carry the "your phone has a virus" scares.
+# Only the installed ones are acted on (block_browser_popups skips the rest).
 BROWSERS = {"com.android.chrome": "Chrome",
+            "com.chrome.beta": "Chrome Beta",
             "com.sec.android.app.sbrowser": "Samsung Internet",
-            "org.mozilla.firefox": "Firefox"}
+            "org.mozilla.firefox": "Firefox",
+            "org.mozilla.focus": "Firefox Focus",
+            "com.brave.browser": "Brave",
+            "com.microsoft.emmx": "Microsoft Edge",
+            "com.opera.browser": "Opera",
+            "com.opera.mini.native": "Opera Mini",
+            "com.opera.gx": "Opera GX",
+            "com.duckduckgo.mobile.android": "DuckDuckGo",
+            "com.UCMobile.intl": "UC Browser",
+            "com.vivaldi.browser": "Vivaldi",
+            "com.kiwibrowser.browser": "Kiwi Browser",
+            "com.yandex.browser": "Yandex Browser"}
 
 
 def block_browser_popups(adb, log):

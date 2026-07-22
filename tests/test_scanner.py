@@ -270,6 +270,13 @@ def test_prettify_label_uses_known_names():
     assert prettify_label("com.zhiliaoapp.musically") == "TikTok (com.zhiliaoapp.musically)"
 
 
+def test_prettify_label_webapk():
+    # last segment is a hash -> label it as the website-shortcut app it is
+    label = prettify_label("org.chromium.webapk.a89fc96887d5bb150_v2")
+    assert label.startswith("Website app (Chrome shortcut)")
+    assert "a89fc96887d5bb150" in label
+
+
 @pytest.mark.parametrize("pkg", [
     "com.a.xkwptqzr", "com.a.a8f3k2j9x",
     "com.alfacln.jkclnr",     # live sample: 6-letter zero-vowel segment

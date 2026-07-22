@@ -373,6 +373,10 @@ def test_block_notifications_from_detail(root, monkeypatch, tmp_path):
     app._render_table()
     app.tree.selection_set("com.random.adware"); app._on_select()
     pump(root, 0.1)
+    # Offered even when the app shows 0 notifications right now (snapshot may be
+    # quiet) -- a known spammer must still be silenceable.
+    assert app._app_by_pkg("com.random.adware").notif_count == 0
+    assert str(app.notif_btn["state"]) == "normal"
     app.on_block_notifs()
     pump(root, 0.6)
     assert ("pm revoke com.random.adware android.permission.POST_NOTIFICATIONS"

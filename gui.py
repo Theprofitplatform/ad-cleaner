@@ -34,8 +34,8 @@ from device import (GB, read_battery_report, read_big_files, read_charging, read
 from report import render_history_html, render_intake_html, render_receipt_html
 from protected import is_blocked
 from scanner import (
-    KNOWN_LABELS, NOTIF_SAMPLES, ROLE_IDS, STALKER_REASON, build_inventory,
-    parse_owners, score_app, set_blocklisted,
+    KNOWN_LABELS, NOTIF_SAMPLES, REASONS, ROLE_IDS, STALKER_REASON,
+    build_inventory, parse_owners, score_app, set_blocklisted,
 )
 from setup_helper import download_platform_tools
 from stalkerware import UPDATED as STALKER_UPDATED
@@ -47,7 +47,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.7.8"
+APP_VERSION = "1.7.9"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1623,6 +1623,10 @@ class AdCleanerApp:
             lines.append("")
             lines.append("Notifications it's showing:  "
                          + " | ".join(f"“{t}”" for t in a.notif_titles[:3]))
+        if REASONS["notif_spam"] in a.reasons or a.notif_titles:
+            lines.append("")
+            lines.append("💡 Spams notifications — press 🔕 Stop its notifications "
+                         "below to silence it without uninstalling.")
         if STALKER_REASON in a.reasons:
             lines.append("")
             lines.append("⚠ This looks like a hidden tracking app. Ask the customer "
@@ -1635,7 +1639,10 @@ class AdCleanerApp:
         self._enable_btn(self.reset_btn, True)
         self._enable_btn(self.backup_btn, True)
         self._enable_btn(self.fixrole_btn, bool(a.hijacked_roles))
-        self._enable_btn(self.notif_btn, a.notif_count > 0)
+        # Always offered: blocking notifications just revokes POST_NOTIFICATIONS,
+        # which works whether or not the app is posting right now -- a known
+        # spammer whose shade is momentarily quiet must still be silenceable.
+        self._enable_btn(self.notif_btn, True)
         self._enable_btn(self.data_btn, a.uid >= 10000)
         self._enable_btn(self.a11y_btn, a.active_accessibility)
 

@@ -4,6 +4,7 @@ Pure parse/score functions (tested against fixtures) plus a thin
 `build_inventory` that drives an Adb object. All device I/O lives in adb.py.
 """
 
+import collections
 import re
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,10 @@ WEIGHTS = {
     "notif_spam": 30,          # floods the notification shade -- alone clears the
                                # Medium bar so ad-notification apps surface on their
                                # own (waived for trusted brands; see score_app)
+    "notif_churn": 30,         # spawns a fresh notification channel per ad so the
+                               # user can never switch it off -- durable (read from
+                               # the channel config, not the live shade), so bursty
+                               # ad pushes are caught even between bursts
     "boot_receiver": 10,       # restarts itself on every reboot (RECEIVE_BOOT_COMPLETED)
     "notif_listener": 25,      # notification listener is switched ON (reads every notification)
 }
@@ -52,6 +57,8 @@ REASONS = {
     "random_name": "Has a random-looking package name",
     "nuisance": "Looks like a junk cleaner/booster/optimizer app",
     "notif_spam": "Floods the phone with notifications",
+    "notif_churn": "Keeps making new notification channels, so turning its "
+                   "notifications off never sticks",
     "boot_receiver": "Restarts itself when the phone reboots",
     "notif_listener": "Can read every notification (texts and bank codes included)",
 }
@@ -104,6 +111,7 @@ HIGH_THRESHOLD = 55
 MEDIUM_THRESHOLD = 30
 RECENT_DAYS = 30
 NOISY_THRESHOLD = 5        # active notifications at scan time -> "notif_spam" signal
+CHURN_THRESHOLD = 3        # channels sharing one display name -> "notif_churn" signal
 NOTIF_SAMPLES = 4          # how many times a live scan reads the shade (peak wins)
 NOTIF_INTERVAL = 1.2       # seconds between those reads (~3.6s window total)
 # ---------------------------------------------------------------------------
@@ -132,6 +140,7 @@ class App:
     notif_count: int = 0              # active notifications at scan time
     notif_titles: list = field(default_factory=list)  # titles it's showing right now
     notif_listener: bool = False      # notification-listener access is switched ON
+    notif_churn: bool = False         # spawns a new notification channel per ad
     data_mb: int = 0                  # background+foreground data used, MB (dumpsys netstats)
     uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
     used_min: int = 0                 # foreground usage minutes (dumpsys usagestats)
@@ -375,6 +384,35 @@ def parse_notification_counts(output):
     return counts
 
 
+def parse_channel_churn(output, threshold=CHURN_THRESHOLD):
+    """`dumpsys notification --noredact` -> {packages that churn notification channels}.
+
+    Ad SDKs create a brand-new channel per push ("Video PlayerYhXI",
+    "Video PlayerGIZ", "Video PlayertVy" — all shown as "Video Player") so
+    switching the channel off in Settings never silences the next ad. Real apps
+    keep stable channel ids, so >=`threshold` channels sharing one display name
+    is the tell. Read from the persistent PackagePreferences config, so it holds
+    even when the shade is empty -- unlike notif_count, which only sees what is
+    posted right now.
+    """
+    churn = set()
+    pkg, names = None, collections.Counter()
+    # NotificationChannel{ also appears inside live NotificationRecords above
+    # this section; anchor here so those don't get counted twice.
+    for line in (output or "").split("PackagePreferences:", 1)[-1].splitlines():
+        line = line.strip()
+        m = re.match(r"AppSettings: (\S+) \(\d+\)", line)
+        if m:
+            pkg, names = m.group(1), collections.Counter()
+            continue
+        m = re.match(r"NotificationChannel\{mId='([^']*)', mName=(.*?), mDescription", line)
+        if m and pkg:
+            names[m.group(2)] += 1
+            if names[m.group(2)] >= threshold:
+                churn.add(pkg)
+    return churn
+
+
 def parse_notification_titles(output):
     """`dumpsys notification --noredact` -> {package: [distinct titles]}.
 
@@ -441,6 +479,7 @@ def score_app(app, now):
         "role_hijack": bool(app.hijacked_roles),
         "nuisance": looks_like_junk(app.package, app.label),
         "notif_spam": app.notif_count >= NOISY_THRESHOLD,
+        "notif_churn": app.notif_churn,
         "boot_receiver": app.boot_receiver,
         "notif_listener": app.notif_listener,
     }
@@ -528,15 +567,16 @@ def set_blocklisted(package, blocked):
 
 def _sample_notifications(adb, samples=1, interval=NOTIF_INTERVAL, sleep=None):
     """Read the notification shade `samples` times, `interval`s apart, and return
-    (peak_count_per_pkg, union_of_titles). A single snapshot misses a spammer
-    that's momentarily quiet; the peak over a short window catches it.
+    (peak_count_per_pkg, union_of_titles, channel_churn_packages). A single
+    snapshot misses a spammer that's momentarily quiet; the peak over a short
+    window catches it, and the channel config catches it even while quiet.
     ponytail: peak+union over a few seconds, no persistent listener -- so ad
     pushes that fire minutes apart still need a scan while they're showing. A
     real always-on capture would need a NotificationListenerService, which we
     don't bind. samples<=1 keeps the old one-shot behaviour (and never sleeps).
     """
     sleep = sleep or time.sleep
-    counts, titles = {}, {}
+    counts, titles, churn = {}, {}, set()
     for n in range(max(1, samples)):
         if n:
             sleep(interval)
@@ -547,7 +587,8 @@ def _sample_notifications(adb, samples=1, interval=NOTIF_INTERVAL, sleep=None):
         for pkg, ts in parse_notification_titles(dump).items():
             seen = titles.setdefault(pkg, [])
             seen.extend(t for t in ts if t not in seen)
-    return counts, titles
+        churn |= parse_channel_churn(dump)  # same dump, no extra adb call
+    return counts, titles, churn
 
 
 def build_inventory(adb, progress=None, now=None, notif_samples=1):
@@ -576,7 +617,7 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
         for pkg in parse_role_holders(_safe(lambda: adb.shell_text(
                 ["cmd", "role", "get-role-holders", role]))):
             role_owner.setdefault(pkg, []).append(friendly)
-    notif, notif_titles = _sample_notifications(adb, notif_samples)
+    notif, notif_titles, notif_churn = _sample_notifications(adb, notif_samples)
     # Same 'pkg/svc:pkg/svc' format as accessibility services -- reuse the parser.
     listeners = parse_enabled_accessibility(_safe(lambda: adb.shell_text(
         ["settings", "get", "secure", "enabled_notification_listeners"])))
@@ -617,6 +658,7 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
             notif_count=notif.get(pkg, 0),
             notif_titles=notif_titles.get(pkg, []),
             notif_listener=pkg in listeners,
+            notif_churn=pkg in notif_churn,
             uid=uid,
             # uid 0 means "unresolved" here (the -U lookup failed for this
             # package), not root -- attributing root's netstats bucket to

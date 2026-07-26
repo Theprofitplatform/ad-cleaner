@@ -462,10 +462,32 @@ def test_sample_notifications_takes_peak_and_union():
             self.i += 1
             return d
 
-    counts, titles = scanner._sample_notifications(
+    counts, titles, churn = scanner._sample_notifications(
         SeqAdb(), samples=3, interval=0, sleep=lambda _s: None)
     assert counts["com.spam.ads"] == 3          # peak, not the last (empty) read
     assert titles["com.spam.ads"] == ["Buy now!", "Cheap pills", "Win a prize"]
+    assert churn == set()                       # no channel config in these dumps
+
+
+def test_parse_channel_churn():
+    # Three channels, three ids, one display name = a new channel per ad.
+    dump = (
+        "  Notification List:\n"
+        "    NotificationRecord(0x1: pkg=com.spam.ads)\n"
+        "      NotificationChannel{mId='Player1', mName=Player, mDescription=}\n"
+        "PackagePreferences:\n"
+        "      AppSettings: com.spam.ads (10348) importance=DEFAULT\n"
+        "        NotificationChannel{mId='PlayerAbC', mName=Player, mDescription=}\n"
+        "        NotificationChannel{mId='PlayerXyZ', mName=Player, mDescription=}\n"
+        "        NotificationChannel{mId='PlayerQqW', mName=Player, mDescription=}\n"
+        "      AppSettings: com.whatsapp (10100) importance=DEFAULT\n"
+        "        NotificationChannel{mId='messages', mName=Messages, mDescription=}\n"
+        "        NotificationChannel{mId='calls', mName=Calls, mDescription=}\n"
+        "        NotificationChannel{mId='groups', mName=Groups, mDescription=}\n"
+    )
+    # the pre-PackagePreferences record channel must not push the count to 4
+    assert scanner.parse_channel_churn(dump) == {"com.spam.ads"}
+    assert scanner.parse_channel_churn("") == set()
 
 
 def test_parse_notification_titles():

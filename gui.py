@@ -47,7 +47,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.1"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1623,7 +1623,7 @@ class AdCleanerApp:
             lines.append("")
             lines.append("Notifications it's showing:  "
                          + " | ".join(f"“{t}”" for t in a.notif_titles[:3]))
-        if REASONS["notif_spam"] in a.reasons or a.notif_titles:
+        if REASONS["notif_spam"] in a.reasons or a.notif_titles or a.notif_churn:
             lines.append("")
             lines.append("💡 Spams notifications — press 🔕 Stop its notifications "
                          "below to silence it without uninstalling.")

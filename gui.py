@@ -50,7 +50,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.10.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1772,6 +1772,8 @@ class AdCleanerApp:
                          "and icon with what the phone shows.")
         elif a.play and not a.play.get("listed"):
             lines.append("• " + playstore.NOT_LISTED_REASON)
+        if a.icon_spoof and not any("uses its icon" in r for r in a.reasons):
+            lines.append(f"⚠ Wearing {a.icon_spoof}'s icon — press 🔄 Rescan to flag it.")
         if a.sensitive_perms:
             lines.append("")
             lines.append("Permissions it has:  " + ", ".join(a.sensitive_perms))
@@ -1817,11 +1819,47 @@ class AdCleanerApp:
         will_clean's unattended nuisance-only fence.
         ponytail: one sequential worker thread; pool it if the trickle annoys."""
         def work():
+            refs, judged = None, appicon.judged_packages()
             for a in apps:
                 info = playstore.lookup(a.package)
                 if info:
                     self._post(self._apply_play, a, info)
+                if not self._icon_check_wanted(a, info, judged):
+                    continue
+                if refs is None:                       # first candidate pays for these
+                    refs = appicon.reference_hashes()
+                brand = appicon.check_lookalike(self.adb, a.package, refs)
+                if brand is None:                      # nothing to compare -- ask again
+                    continue                           # next scan, don't record a verdict
+                appicon.remember_lookalike(a.package, brand)
+                if brand:
+                    self._post(self._apply_icon_spoof, a, brand)
         self._run_bg(work)
+
+    def _icon_check_wanted(self, a, info, judged):
+        """Is this app worth pulling an APK for, to compare its icon?
+
+        Only ones the scan already doubts, and only ones outside the normal
+        supply chain -- sideloaded, or absent from Play. A store-installed,
+        Play-listed app that resembles a famous icon is almost always a family
+        member (Chrome Beta, WhatsApp Business), not an impersonator, and the
+        APK pull is expensive enough to be worth skipping.
+        """
+        if a.protected or a.risk not in SUSPICIOUS or a.package in judged:
+            return False
+        return a.installer is None or (info is not None and not info.get("listed"))
+
+    def _apply_icon_spoof(self, a, brand):
+        # Display-only here, exactly like the Play verdict: a.reasons is read by
+        # the clean worker thread and feeds will_clean's fence, so it is never
+        # written from this thread. The verdict is on disk; the next scan scores it.
+        if a not in self.apps:
+            return
+        a.icon_spoof = brand
+        if self.selected is a:
+            self._update_detail()
+        self.status_line(f"{a.label.split(' (')[0]} is wearing {brand}'s icon — "
+                         f"press 🔄 Rescan to flag it.", "error")
 
     def _apply_play(self, a, info):
         if a not in self.apps:          # a rescan replaced the list meanwhile

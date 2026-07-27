@@ -63,8 +63,12 @@ class Adb:
             cmd += ["-s", self.serial]
         return cmd + list(args)
 
-    def run(self, args, timeout=DEFAULT_TIMEOUT):
-        """Run `adb [-s serial] <args>`; return stdout. Raise AdbError on failure."""
+    def run(self, args, timeout=DEFAULT_TIMEOUT, _recover=True):
+        """Run `adb [-s serial] <args>`; return stdout. Raise AdbError on failure.
+
+        A phone that has dropped to `offline` is kicked back once and the
+        command retried -- see reconnect().
+        """
         try:
             proc = subprocess.run(
                 self._cmd(args),
@@ -78,8 +82,30 @@ class Adb:
         except FileNotFoundError:
             raise AdbError("adb.exe not found")
         if proc.returncode != 0:
-            raise AdbError(_friendly(proc.stderr or proc.stdout))
+            err = proc.stderr or proc.stdout
+            if _recover and "offline" in (err or "").lower():
+                self.reconnect()
+                return self.run(args, timeout, _recover=False)
+            raise AdbError(_friendly(err))
         return proc.stdout
+
+    def reconnect(self):
+        """Kick a phone that has dropped to `offline` back to `device` state.
+
+        Samsungs go offline on their own -- the USB link renegotiates, or the
+        screen locks -- and then every command fails until the cable is pulled.
+        `adb reconnect offline` fixes it in place. Field-seen (SM-S731B): a scan
+        succeeded, the phone went offline, and every later Pause/Uninstall died
+        before it could even reach the undo log.
+        ponytail: one kick, no backoff loop -- if this doesn't take, the cable or
+        the USB-debugging authorization is genuinely gone and only the user can
+        fix it. _recover=False on both calls so a failure here can't recurse.
+        """
+        try:
+            self.run(["reconnect", "offline"], timeout=10, _recover=False)
+            self.run(["wait-for-device"], timeout=10, _recover=False)
+        except AdbError:
+            pass   # the retry in run() will surface the real error
 
     def shell_text(self, args, timeout=DEFAULT_TIMEOUT):
         return self.run(["shell"] + list(args), timeout)

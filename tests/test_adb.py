@@ -1,5 +1,7 @@
 import sys
 
+import pytest
+
 import adb
 from adb import _friendly, parse_devices
 
@@ -26,6 +28,49 @@ def test_run_survives_non_utf8_output():
     code = r"import sys; sys.stdout.buffer.write(b'app\x81name'); sys.exit(0)"
     out = adb.Adb(sys.executable).run(["-c", code])
     assert "app" in out and "name" in out   # decoded, no UnicodeDecodeError
+
+
+def test_run_recovers_from_offline_device(monkeypatch):
+    """A Samsung drops to `offline` on its own; run() must kick it with
+    `adb reconnect offline` and retry once, not fail the whole action.
+    Field regression (SM-S731B): the scan worked, the phone went offline, and
+    every later Pause/Uninstall died before it reached the undo log."""
+    calls = []
+
+    class Proc:
+        def __init__(self, rc, err=""):
+            self.returncode, self.stdout, self.stderr = rc, "ok\n", err
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[1:])                       # drop the adb path
+        if cmd[-1] == "boom" and len(calls) == 1:   # first real attempt
+            return Proc(1, "adb.exe: device offline")
+        return Proc(0)
+
+    monkeypatch.setattr(adb.subprocess, "run", fake_run)
+    assert adb.Adb("adb", serial="R5C").run(["shell", "boom"]) == "ok\n"
+    assert calls == [
+        ["-s", "R5C", "shell", "boom"],             # fails offline
+        ["-s", "R5C", "reconnect", "offline"],      # kick
+        ["-s", "R5C", "wait-for-device"],
+        ["-s", "R5C", "shell", "boom"],             # retried, succeeds
+    ]
+
+
+def test_run_offline_gives_up_after_one_retry(monkeypatch):
+    """A phone that is genuinely unplugged must raise, not loop forever."""
+    n = []
+
+    class Proc:
+        returncode, stdout, stderr = 1, "", "adb.exe: device offline"
+
+    monkeypatch.setattr(adb.subprocess, "run",
+                        lambda cmd, **kw: (n.append(1), Proc())[1])
+    with pytest.raises(adb.AdbError):
+        adb.Adb("adb").run(["shell", "boom"])
+    # attempt + reconnect + one retry. The kick errors too here, so reconnect()
+    # bails before wait-for-device -- either way the call count is bounded.
+    assert len(n) == 3
 
 
 def test_find_adb_prefers_bundled_meipass(tmp_path, monkeypatch):

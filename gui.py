@@ -47,7 +47,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.2"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -1925,7 +1925,7 @@ class AdCleanerApp:
         total = len(apps)
 
         def work():
-            done, removed = 0, []
+            done, removed, err = 0, [], None
             for i, a in enumerate(apps, 1):
                 self._post(self.status_line,
                            f"{verb} {i} of {total}: {a.label.split(' (')[0]}…")
@@ -1934,13 +1934,16 @@ class AdCleanerApp:
                         done += 1
                         if removes:
                             removed.append(a.package)
-                except Exception:
-                    pass
-            self._post(self._bulk_done, verb, done, total, removed)
+                except Exception as e:
+                    # Keep going through the rest, but hang on to the first
+                    # reason: "Paused 0 of 40" with no explanation sent a real
+                    # unplug-the-cable hunt after an offline phone.
+                    err = err or str(e)
+            self._post(self._bulk_done, verb, done, total, removed, err)
 
         self._run_bg(work)
 
-    def _bulk_done(self, verb, done, total, removed):
+    def _bulk_done(self, verb, done, total, removed, err=None):
         self.busy = False
         if removed:
             gone = set(removed)
@@ -1950,8 +1953,10 @@ class AdCleanerApp:
         self._render_table()
         self._show_summary(self.apps)
         self._update_detail()
-        self.status_line(f"{verb} {done} of {total} app(s).",
-                         "good" if done else "error")
+        msg = f"{verb} {done} of {total} app(s)."
+        if done < total and err:
+            msg += "  " + self._friendly(err)
+        self.status_line(msg, "good" if done == total else "error")
 
     def _copy_pkg(self):
         if self.selected:

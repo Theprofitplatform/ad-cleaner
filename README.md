@@ -79,6 +79,27 @@ individual apps), then restart the phone normally.
 
 ---
 
+## Which app is showing the pop-ups?
+
+Everything else the scan reports is circumstantial — an app *can* draw over the
+screen, it *was* sideloaded, it *floods* notifications. The **Watch for pop-ups**
+tab is the proof.
+
+Press **👁 Start watching**, then use the phone normally. Every app that puts a
+window over the screen is caught in the list with the time, and is marked
+**HIGH risk** on the next 🔄 Rescan — the reason reads *"Caught drawing a pop-up
+over your screen (27 Jul, 3:42 PM)"*, and it prints on the customer's receipt.
+
+The list also shows which app **jumped to the front**, for full-screen ads that
+aren't drawn as overlays. Those aren't counted automatically — you may have
+opened that app yourself — so if an ad appears, click the line that appeared at
+the same moment and press **⚑ This one was the ad**.
+
+Nothing is installed on the phone and nothing is changed; it only reads the
+phone's window list, about once a second. Watching pauses while a scan runs.
+
+---
+
 ## What the buttons do
 
 | Button | What happens |
@@ -99,6 +120,7 @@ individual apps), then restart the phone normally.
 | **📲 Smart Switch (transfer data)** | On the Device tab. Opens Samsung's Smart Switch on the phone so you can send apps, texts and more to a new phone, cable-to-cable. |
 | **🏪 Shop details…** | On the History tab. Enter your shop's name and contact details once and they'll print at the top of every receipt and condition report. |
 | **📶 Connect over Wi-Fi…** | In the connect wizard. For phones whose USB port charges but won't carry data — connects wirelessly instead of over the cable. |
+| **👁 Start watching** | On the **Watch for pop-ups** tab. Watches the phone's screen while you use it and catches the app that draws the pop-up, by name and time. Read-only. |
 | **🔋 Check battery usage** | On the Battery tab. Ranks every app by how much battery it's used since the phone's last full charge and names the package, so a no-name adware app draining the battery in the background stands out. Read-only. |
 
 Anything marked with a 🔒 padlock is a protected system app and can't be changed.

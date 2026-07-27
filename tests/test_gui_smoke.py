@@ -92,6 +92,8 @@ class FakeAdb:
             return "package:com.facebook.appmanager\n"
         if args == ["pm", "list", "packages"]:
             return "".join(f"package:{p}\n" for p in self.installed)
+        if args == ["dumpsys", "window", "windows"]:
+            return fx("dumpsys_window.txt")
         if args == ["dumpsys", "cpuinfo"]:
             return fx("cpuinfo.txt")
         if args == ["dumpsys", "meminfo"]:
@@ -819,3 +821,23 @@ def test_receipt_carries_shop_details(root, monkeypatch, tmp_path):
                             "popups_blocked": 0, "packages": [], "dns": "Off",
                             "freed_gb": 0})
     assert path and "Fix It Bros" in path.read_text(encoding="utf-8")
+
+
+def test_watch_catches_the_app_drawing_over_the_screen(root, monkeypatch, tmp_path):
+    """Watch tab end-to-end: poll -> the overlay owner lands in the timeline and
+    is remembered, so the next scan can score it."""
+    import adb as adb_mod
+    from watch import load_caught
+    _wire(gui, monkeypatch, tmp_path)
+    monkeypatch.setattr(adb_mod, "data_dir", lambda: tmp_path)   # keep the log in tmp
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.0)                     # connect + first scan
+    app.on_watch_toggle()
+    pump(root, 1.0)
+    app._stop_watch()
+    rows = [" ".join(app.watch_tree.item(i, "values"))
+            for i in app.watch_tree.get_children()]
+    assert any("com.adware.pop" in r for r in rows), rows
+    assert "com.adware.pop" in load_caught()
+    # Chrome was merely in the foreground; that is not evidence.
+    assert "com.android.chrome" not in load_caught()

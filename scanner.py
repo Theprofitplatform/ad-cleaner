@@ -19,6 +19,9 @@ from stalkerware import is_stalkerware
 
 # --- Scoring knobs: tune here. (BUILD_PLAN 4.2) -----------------------------
 WEIGHTS = {
+    "caught_live": 60,         # seen drawing over the screen during a Watch session
+                               # -- evidence, not suspicion, so it clears HIGH alone
+                               # and leads the reason list (see watch.py)
     "overlay": 40,             # allowed to draw over other apps (the popup mechanism)
     "sideloaded": 25,          # installer is null or not a known store
     "active_accessibility": 25,  # accessibility service is switched ON (controls phone)
@@ -44,6 +47,7 @@ WEIGHTS = {
     "notif_listener": 25,      # notification listener is switched ON (reads every notification)
 }
 REASONS = {
+    "caught_live": "Caught drawing a pop-up over your screen",
     "overlay": "Can draw pop-ups over other apps",
     "sideloaded": "Installed from outside an app store (sideloaded)",
     "active_accessibility": "Accessibility control is switched ON (can tap/read the screen)",
@@ -144,6 +148,7 @@ class App:
     data_mb: int = 0                  # background+foreground data used, MB (dumpsys netstats)
     uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
     used_min: int = 0                 # foreground usage minutes (dumpsys usagestats)
+    caught_live: datetime | None = None  # when Watch saw it draw over the screen
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
@@ -464,6 +469,7 @@ def score_app(app, now):
         app.score, app.risk, app.reasons = 0, "Low", []
         return app
     signals = {
+        "caught_live": bool(app.caught_live),
         "overlay": app.overlay,
         "sideloaded": app.installer is None,
         "hidden": app.hidden,
@@ -488,13 +494,20 @@ def score_app(app, now):
             or app.installer in BRAND_UPDATERS):
         # Household-name app from a real store: SMS/contacts access, boot
         # start, self-update and fresh installs are its job, not a signal.
-        # Dangerous signals (overlay, hidden, admin, accessibility, role
-        # hijack, notif listener) still count in full.
+        # caught_live is waived too -- Messenger chat heads and screen
+        # recorders draw over the screen for a living. Dangerous signals
+        # (overlay, hidden, admin, accessibility, role hijack, notif
+        # listener) still count in full.
         for k in ("request_install", "sensitive_data", "boot_receiver",
-                  "recent_install", "notif_spam"):
+                  "recent_install", "notif_spam", "caught_live"):
             signals[k] = False
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
+    if signals["caught_live"]:  # say when, so the customer recognises the moment
+        stamp = app.caught_live.strftime("%d %b, %I:%M %p").lstrip("0")
+        detail = f"{REASONS['caught_live']} ({stamp})"
+        app.reasons = [detail if r == REASONS["caught_live"] else r
+                       for r in app.reasons]
     if app.hijacked_roles:  # name the specific defaults it seized
         detail = "Took over a system default (" + ", ".join(app.hijacked_roles) + ")"
         app.reasons = [detail if r == REASONS["role_hijack"] else r for r in app.reasons]
@@ -627,6 +640,8 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
         ["dumpsys", "netstats"])))
     usage = parse_usage_minutes(_safe(lambda: adb.shell_text(
         ["dumpsys", "usagestats"])))
+    from watch import load_caught   # local import: keeps the parse/score core adb-free
+    caught = _safe(lambda: load_caught(now), {})
 
     apps = []
     packages = sorted(installers)
@@ -665,6 +680,7 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
             # every unresolved app would inflate all of their data_mb.
             data_mb=(data_use.get(uid, 0) // (1024 * 1024)) if uid else 0,
             used_min=usage.get(pkg, 0),
+            caught_live=caught.get(pkg),
         )
         score_app(app, now)
         apps.append(app)
@@ -730,6 +746,22 @@ def demo():
     score_app(wa, now)
     assert wa.risk == "Low", (wa.score, wa.reasons)
     assert prettify_label("com.instagram.barcelona").startswith("Threads")
+
+    # Watch caught it in the act: HIGH on that alone, and the reason says when.
+    caught = App(package="com.quiet.adware", installer="com.android.vending",
+                 first_install=datetime(2020, 1, 1),
+                 caught_live=datetime(2024, 3, 1, 15, 42))
+    score_app(caught, now)
+    assert caught.risk == "HIGH", (caught.score, caught.reasons)
+    assert caught.reasons[0].startswith("Caught drawing a pop-up")
+    assert "3:42 PM" in caught.reasons[0], caught.reasons[0]
+
+    # Same evidence against a household app from a real store: chat heads, waived.
+    bubbles = App(package="com.facebook.orca", installer="com.android.vending",
+                  first_install=datetime(2020, 1, 1),
+                  caught_live=datetime(2024, 3, 1, 15, 42))
+    score_app(bubbles, now)
+    assert bubbles.risk == "Low", (bubbles.score, bubbles.reasons)
 
     owners = parse_owners("Device Owner:\n  admin=ComponentInfo{com.mdm.x/.A}\n")
     assert owners == {"device": "com.mdm.x", "profile": None}

@@ -39,6 +39,9 @@ from scanner import (
 )
 from setup_helper import download_platform_tools
 from stalkerware import UPDATED as STALKER_UPDATED
+from watch import (
+    EVIDENCE, POLL_SECONDS, WatchEvent, WatchSession, read_windows, record,
+)
 
 import appicon
 import mirror
@@ -47,7 +50,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.8.2"
+APP_VERSION = "1.9.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -120,6 +123,9 @@ WHAT THE BUTTONS DO
   * STOP ALL APPS NOW - instantly closes every downloaded app.
   * Pause - freezes one app so it can't run (fully reversible with Resume).
   * Uninstall - removes an app for you (restore it later from the History tab).
+  * Watch for pop-ups - press Start, then use the phone until an ad appears.
+    Whatever draws over the screen is caught by name and time, and is marked
+    HIGH risk on the next scan. Nothing on the phone is changed.
 
 TROUBLESHOOTING
 
@@ -226,6 +232,9 @@ class AdCleanerApp:
         self.ui_queue = queue.Queue()
         self.alive = True
         self.busy = False
+        self.watching = False
+        self._watch_stop = threading.Event()   # also wakes the poll loop instantly
+        self.watch_rows = {}                   # tree iid -> WatchEvent
         self._pending_clean = False
         self.battery_report = None
         self.owners = None
@@ -414,6 +423,7 @@ class AdCleanerApp:
         nb = ttk.Notebook(self.root)
         nb.pack(fill="both", expand=True, padx=10, pady=(6, 2))
         self._build_apps_tab(nb)
+        self._build_watch_tab(nb)
         self._build_history_tab(nb)
         self._build_device_tab(nb)
         self._build_move_tab(nb)
@@ -870,6 +880,150 @@ class AdCleanerApp:
     def on_move_guide(self):
         webbrowser.open(
             "https://www.google.com/search?q=copy+apps+and+data+to+new+android+phone")
+
+    # --- watch for pop-ups --------------------------------------------------
+
+    def _build_watch_tab(self, nb):
+        tab = ttk.Frame(nb, padding=18)
+        nb.add(tab, text="Watch for pop-ups")
+        ttk.Label(tab, text="Which app is showing the pop-ups?",
+                  font=(FONT, 14, "bold")).pack(anchor="w")
+        ttk.Label(tab, text="Press Start, then use the phone normally until an ad appears. "
+                            "Any app that draws over the screen is caught here with the time, "
+                            "and is marked HIGH on the next scan. If an ad arrives without "
+                            "one being caught, pick the line that appeared at the same moment "
+                            "and press “This one was the ad”. Nothing on the phone is changed.",
+                  style="Muted.TLabel", wraplength=820).pack(anchor="w", pady=(2, 12))
+
+        self.watch_summary = tk.Label(
+            tab, text="Press “Start watching” below, then use the phone.",
+            anchor="w", font=(FONT, 12, "bold"), bg=BASE, fg=MUTED, padx=12, pady=9)
+        self.watch_summary.pack(fill="x", pady=(0, 8))
+
+        wrap = ttk.Frame(tab)
+        wrap.pack(fill="both", expand=True)
+        cols = ("when", "app", "what")
+        self.watch_tree = ttk.Treeview(wrap, columns=cols, show="headings",
+                                       selectmode="browse")
+        for c, head, w in zip(cols, ("When", "App", "What happened"), (110, 380, 290)):
+            self.watch_tree.heading(c, text=head)
+            self.watch_tree.column(c, width=w, anchor="w", stretch=(c == "app"))
+        self.watch_tree.tag_configure("evidence", foreground=RED)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.watch_tree.yview)
+        self.watch_tree.configure(yscrollcommand=vsb.set)
+        self.watch_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=(10, 0))
+        self.watch_btn = self._flat_button(row, "👁  Start watching",
+                                           self.on_watch_toggle, SLATE, SLATE_HOT)
+        self.watch_btn.pack(side="left")
+        self.watch_flag_btn = self._flat_button(row, "⚑  This one was the ad",
+                                                self.on_watch_flag, AMBER, AMBER_HOT)
+        self.watch_flag_btn.pack(side="left", padx=8)
+        self.watch_show_btn = self._flat_button(row, "↗  Show in the Apps list",
+                                                self.on_watch_show, SLATE, SLATE_HOT)
+        self.watch_show_btn.pack(side="left")
+        self.watch_btns = [self.watch_btn, self.watch_flag_btn, self.watch_show_btn]
+        for b in self.watch_btns:
+            self._enable_btn(b, False)
+
+    def on_watch_toggle(self):
+        if self.watching:
+            self._stop_watch("Stopped watching.")
+            return
+        if not self.serial:
+            return
+        self.watching = True
+        self._watch_stop.clear()
+        self.watch_btn.config(text="⏹  Stop watching")
+        self.watch_summary.config(
+            text="👁  Watching the screen… use the phone until an ad appears.",
+            bg=BANNER["info"][0], fg=BANNER["info"][1])
+        self.status_line("Watching for pop-ups. Leave this running and use the phone.")
+        self._run_bg(self._watch_loop)
+
+    def _watch_loop(self):
+        """Poll the window manager until stopped. Runs on a worker thread."""
+        session = WatchSession()
+        while not self._watch_stop.is_set() and self.serial:
+            try:
+                text = read_windows(self.adb)
+            except Exception as e:
+                self._post(self._watch_failed, str(e))
+                return
+            events = session.update(text)
+            if events:
+                record(events)          # file write stays off the UI thread
+                self._post(self._watch_events, events)
+            self._watch_stop.wait(POLL_SECONDS)
+
+    def _watch_events(self, events):
+        for e in events:
+            app = self._app_by_pkg(e.package)
+            iid = str(len(self.watch_rows))
+            self.watch_rows[iid] = e
+            self.watch_tree.insert(
+                "", 0, iid=iid,
+                tags=(("evidence",) if e.kind in EVIDENCE else ()),
+                values=(e.when.strftime("%H:%M:%S"),
+                        app.label if app else e.package, e.what))
+        caught = [e for e in events if e.kind in EVIDENCE]
+        if caught:
+            bg, fg = BANNER["alert"]
+            self.watch_summary.config(
+                text=f"⚠️  Caught {caught[-1].package} drawing over the screen — "
+                     f"press 🔄 Rescan to flag it.", bg=bg, fg=fg)
+
+    def _watch_failed(self, err):
+        self._stop_watch()
+        bg, fg = BANNER["alert"]
+        self.watch_summary.config(text="Couldn't read the screen. " + self._friendly(err),
+                                  bg=bg, fg=fg)
+
+    def _stop_watch(self, message=None):
+        if not self.watching:
+            return
+        self.watching = False
+        self._watch_stop.set()
+        self.watch_btn.config(text="👁  Start watching")
+        if message:
+            self.status_line(message)
+
+    def _watch_selection(self):
+        sel = self.watch_tree.selection()
+        e = self.watch_rows.get(sel[0]) if sel else None
+        if not e:
+            self.status_line("Pick a line in the list first.", "error")
+        return e
+
+    def on_watch_flag(self):
+        """Promote a timeline line to evidence -- the operator saw the ad with it."""
+        e = self._watch_selection()
+        if not e:
+            return
+        record([WatchEvent(e.when, e.package, "flagged")])
+        for iid, ev in self.watch_rows.items():
+            if ev is e:
+                self.watch_tree.item(iid, tags=("evidence",))
+        self.status_line(f"Marked {e.package} as the ad — it will show as HIGH "
+                         f"after the next 🔄 Rescan.", "good")
+
+    def on_watch_show(self):
+        e = self._watch_selection()
+        if not e:
+            return
+        if not self._app_by_pkg(e.package):
+            self.status_line("That app isn't in the list yet — press 🔄 Rescan.", "error")
+            return
+        self.suspicious_var.set(False)      # the row must be visible whatever it scored
+        self.filter_var.set(e.package)      # traces -> _render_table
+        self.notebook.select(0)
+        if self.tree.exists(e.package):
+            self.tree.selection_set(e.package)
+            self.tree.see(e.package)
+            self._on_select()
 
     def _build_crashes_tab(self, nb):
         tab = ttk.Frame(nb, padding=18)
@@ -1376,6 +1530,8 @@ class AdCleanerApp:
             self._enable_btn(b, True)
         self._enable_btn(self.crash_btn, True)
         self._enable_btn(self.batt_btn, True)
+        for b in self.watch_btns:
+            self._enable_btn(b, True)
         self._refresh_device()
         self._refresh_dns()
         self.status_line("Phone connected. Scanning apps…")
@@ -1384,6 +1540,7 @@ class AdCleanerApp:
     def _disconnect(self, message, color):
         was = self.serial
         self.serial = None
+        self._stop_watch()
         if self.adb:
             self.adb = Adb(self.adb.adb_path)  # drop the -s binding
         self._set_status(color, message)
@@ -1394,6 +1551,8 @@ class AdCleanerApp:
         for b in self.bulk_btns + self.dev_btns + self.dns_btns + self.move_btns:
             self._enable_btn(b, False)
         self._enable_btn(self.crash_btn, False)
+        for b in self.watch_btns:
+            self._enable_btn(b, False)
         for v in self.dev_vars.values():
             v.set("—")
         self.battery_report = None  # don't let phone A's health survive into phone B's session
@@ -1410,6 +1569,9 @@ class AdCleanerApp:
     def on_rescan(self):
         if self.busy or not self.serial:
             return
+        # One adb channel: a 1s poll loop and a full scan fight for it, and the
+        # scan is the one that must finish.
+        self._stop_watch("Watching paused for the scan.")
         self.busy = True
         self._enable_btn(self.rescan_btn, False)
         self.progress.pack(side="right", padx=8)
@@ -2081,6 +2243,11 @@ class AdCleanerApp:
             if top_used:
                 receipt["most_used"] = ", ".join(
                     f"{a.label.split(' (')[0] or a.package} ({a.used_min} min)" for a in top_used)
+            caught = [f"{a.label.split(' (')[0] or a.package} "
+                      f"({a.caught_live.strftime('%d %b, %I:%M %p').lstrip('0')})"
+                      for a in self.apps if a.caught_live]
+            if caught:
+                receipt["caught"] = caught
             folder = data_dir() / "reports"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"receipt_{datetime.now():%Y%m%d_%H%M%S}.html"
@@ -3151,4 +3318,5 @@ class AdCleanerApp:
 
     def _on_close(self):
         self.alive = False
+        self._watch_stop.set()   # let the poll loop exit instead of waiting out its sleep
         self.root.destroy()

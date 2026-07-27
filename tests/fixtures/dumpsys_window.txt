@@ -1,0 +1,63 @@
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #0 Window{c9d2ae4 u0 NavigationBar0}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{f3e0e08 1234:1000} mClient=android.os.BinderProxy@8f0a
+    mOwnerUid=1000 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillx132) gr=BOTTOM CENTER_VERTICAL sim={adjust=pan} ty=NAVIGATION_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE TOUCHABLE_WHEN_WAKING SPLIT_TOUCH HARDWARE_ACCELERATED}
+    Requested w=1080 h=132 mLayoutSeq=8841
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #1 Window{51f0aa2 u0 ScreenDecorOverlay}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{f3e0e08 1234:1000} mClient=android.os.BinderProxy@8f0b
+    mOwnerUid=1000 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillxfill) gr=TOP CENTER_VERTICAL sim={adjust=pan} ty=APPLICATION_OVERLAY fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCHABLE HARDWARE_ACCELERATED}
+    Requested w=1080 h=2400 mLayoutSeq=8842
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #2 Window{b7c1d02 u0 com.adware.pop}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{a1b2c3d 9821:10240} mClient=android.os.BinderProxy@1234
+    mOwnerUid=10240 showForAllUsers=false package=com.adware.pop appop=SYSTEM_ALERT_WINDOW
+    mAttrs={(0,0)(fillxfill) gr=CENTER sim={adjust=pan} ty=APPLICATION_OVERLAY fmt=TRANSLUCENT
+      fl=NOT_TOUCH_MODAL WATCH_OUTSIDE_TOUCH HARDWARE_ACCELERATED}
+    Requested w=1080 h=2400 mLayoutSeq=8843
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #3 Window{2ac91be u0 com.sneaky.hidden}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{d4e5f6a 9902:10241} mClient=android.os.BinderProxy@1235
+    mOwnerUid=10241 showForAllUsers=false package=com.sneaky.hidden appop=SYSTEM_ALERT_WINDOW
+    mAttrs={(0,0)(1x1) gr=TOP START sim={adjust=pan} ty=APPLICATION_OVERLAY fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCHABLE}
+    Requested w=1 h=1 mLayoutSeq=8844
+    mHasSurface=false isReadyForDisplay()=false mWindowRemovalAllowed=true
+  Window #4 Window{7d0b118 u0 Toast}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{bb11cc2 9950:10242} mClient=android.os.BinderProxy@1236
+    mOwnerUid=10242 showForAllUsers=false package=com.chat.app appop=NONE
+    mAttrs={(0,0)(wrapxwrap) gr=CENTER_HORIZONTAL BOTTOM sim={adjust=pan} ty=TOAST fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE NOT_TOUCHABLE KEEP_SCREEN_ON}
+    Requested w=560 h=120 mLayoutSeq=8845
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #5 Window{9ef2201 u0 InputMethod}:
+    mDisplayId=0 rootTaskId=-1 mSession=Session{cc22dd3 4410:10111} mClient=android.os.BinderProxy@1237
+    mOwnerUid=10111 showForAllUsers=false package=com.samsung.android.honeyboard appop=NONE
+    mAttrs={(0,0)(fillx900) gr=BOTTOM CENTER_VERTICAL sim={adjust=pan} ty=INPUT_METHOD fmt=TRANSPARENT
+      fl=NOT_FOCUSABLE ALT_FOCUSABLE_IM HARDWARE_ACCELERATED}
+    Requested w=1080 h=900 mLayoutSeq=8846
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #6 Window{4b7f0c9 u0 Splash Screen com.android.chrome}:
+    mDisplayId=0 rootTaskId=42 mSession=Session{ee33ff4 5120:10087} mClient=android.os.BinderProxy@1238
+    mOwnerUid=10087 showForAllUsers=false package=com.android.chrome appop=NONE
+    mAttrs={(0,0)(fillxfill) gr=CENTER sim={adjust=resize} ty=APPLICATION_STARTING fmt=OPAQUE
+      fl=NOT_FOCUSABLE SPLIT_TOUCH HARDWARE_ACCELERATED}
+    Requested w=1080 h=2400 mLayoutSeq=8847
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+  Window #7 Window{e10a3f5 u0 com.android.chrome/com.google.android.apps.chrome.Main}:
+    mDisplayId=0 rootTaskId=42 mSession=Session{ee33ff4 5120:10087} mClient=android.os.BinderProxy@1239
+    mOwnerUid=10087 showForAllUsers=false package=com.android.chrome appop=NONE
+    mAttrs={(0,0)(fillxfill) gr=CENTER sim={adjust=resize} ty=BASE_APPLICATION fmt=TRANSLUCENT
+      fl=LAYOUT_IN_SCREEN SPLIT_TOUCH HARDWARE_ACCELERATED}
+    Requested w=1080 h=2400 mLayoutSeq=8848
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+
+  mGlobalConfiguration={1.0 310mcc260mnc [en_AU] ldltr sw411dp w411dp h869dp 420dpi}
+  mHasPermanentDpad=false
+  mCurrentFocus=Window{e10a3f5 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  mFocusedApp=ActivityRecord{a9b8c7d u0 com.android.chrome/com.google.android.apps.chrome.Main t42}
+  mInTouchMode=true mDisplayFrozen=false

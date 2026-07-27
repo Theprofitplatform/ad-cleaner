@@ -53,6 +53,12 @@ def render_receipt_html(receipt: dict) -> str:
     if pkgs:
         items = "".join(f"<li>{html.escape(p)}</li>" for p in pkgs)
         pkg_block = f"<h2>{verb} apps</h2><ul>{items}</ul>"
+    caught = r.get("caught") or []
+    caught_block = ""
+    if caught:
+        items = "".join(f"<li>{html.escape(c)}</li>" for c in caught)
+        caught_block = ("<h2>Caught showing pop-ups</h2><p class='muted'>Seen drawing "
+                        f"over the screen while the phone was watched:</p><ul>{items}</ul>")
     installs_line = (f"<p><b>Blocked from installing other apps:</b> "
                      f"{r['installs_blocked']} app(s)</p>"
                      if r.get("installs_blocked") else "")
@@ -79,7 +85,7 @@ def render_receipt_html(receipt: dict) -> str:
         f"<p><b>{verb}:</b> {r.get('acted', 0)} risky app(s)</p>"
         f"{installs_line}{verify_line}"
         f"<p><b>Ad blocking (Private DNS):</b> {html.escape(str(r.get('dns', 'Off')))}</p>"
-        f"{freed_line}{battery_line}{most_used_line}{pkg_block}"
+        f"{freed_line}{battery_line}{most_used_line}{caught_block}{pkg_block}"
     )
     return _html_page("Ad Cleaner receipt", body)
 

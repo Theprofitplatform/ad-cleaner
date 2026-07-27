@@ -131,6 +131,24 @@ panel shows extra evidence when the phone reports it: how much **battery** and
 many **notifications** it posts. The Device tab shows the phone's **battery health**
 (where the phone reports it) and its top battery user; both land on the clean receipt.
 
+### Fake apps wearing a famous icon
+
+A fake app copies a real one's **icon** — that's what the customer recognises on
+the home screen. After each scan, any doubted app that came from **outside the
+Play Store** (or isn't listed on Play at all) has its icon pulled off the phone
+and compared against the real artwork for Chrome, the Play Store, Settings,
+Gmail, WhatsApp, Facebook, Instagram, YouTube and a dozen more.
+
+A match reads *"Pretends to be WhatsApp — it uses its icon"* and scores Medium on
+the next 🔄 Rescan — Medium rather than HIGH on purpose, because an image
+comparison is a strong hint and not proof; combined with anything else (being
+sideloaded, hidden, holding overlay permission) it clears HIGH on its own.
+
+Store-installed apps that Google lists normally are skipped: Chrome Beta and
+WhatsApp Business legitimately wear the family icon. Verdicts are remembered in
+`adcleaner_data/icon_spoof.json`, so the same fake is flagged instantly on the
+next phone.
+
 ### Stalkerware
 
 Ad Cleaner also flags known hidden tracking apps ("stalkerware") that someone

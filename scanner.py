@@ -22,6 +22,10 @@ WEIGHTS = {
     "caught_live": 60,         # seen drawing over the screen during a Watch session
                                # -- evidence, not suspicion, so it clears HIGH alone
                                # and leads the reason list (see watch.py)
+    "icon_spoof": 40,          # wears a famous app's icon (see appicon.check_lookalike)
+                               # -- Medium alone: an image hash is a strong hint,
+                               # not proof, and a Medium is still auto-cleanable,
+                               # so it must not reach HIGH without a second signal
     "overlay": 40,             # allowed to draw over other apps (the popup mechanism)
     "sideloaded": 25,          # installer is null or not a known store
     "active_accessibility": 25,  # accessibility service is switched ON (controls phone)
@@ -48,6 +52,7 @@ WEIGHTS = {
 }
 REASONS = {
     "caught_live": "Caught drawing a pop-up over your screen",
+    "icon_spoof": "Wears another app's icon",
     "overlay": "Can draw pop-ups over other apps",
     "sideloaded": "Installed from outside an app store (sideloaded)",
     "active_accessibility": "Accessibility control is switched ON (can tap/read the screen)",
@@ -149,6 +154,7 @@ class App:
     uid: int = 0                      # app uid, e.g. 10231 (0 if unknown)
     used_min: int = 0                 # foreground usage minutes (dumpsys usagestats)
     caught_live: datetime | None = None  # when Watch saw it draw over the screen
+    icon_spoof: str = ""              # brand whose icon it copies ("" = none/unchecked)
     score: int = 0
     risk: str = "Low"
     reasons: list = field(default_factory=list)
@@ -470,6 +476,7 @@ def score_app(app, now):
         return app
     signals = {
         "caught_live": bool(app.caught_live),
+        "icon_spoof": bool(app.icon_spoof),
         "overlay": app.overlay,
         "sideloaded": app.installer is None,
         "hidden": app.hidden,
@@ -498,11 +505,17 @@ def score_app(app, now):
         # recorders draw over the screen for a living. Dangerous signals
         # (overlay, hidden, admin, accessibility, role hijack, notif
         # listener) still count in full.
+        # icon_spoof is waived too: brand families share artwork (Facebook Lite
+        # wears Facebook's icon, Messenger Lite wears Messenger's).
         for k in ("request_install", "sensitive_data", "boot_receiver",
-                  "recent_install", "notif_spam", "caught_live"):
+                  "recent_install", "notif_spam", "caught_live", "icon_spoof"):
             signals[k] = False
     app.score = sum(WEIGHTS[k] for k, on in signals.items() if on)
     app.reasons = [REASONS[k] for k in WEIGHTS if signals[k]]
+    if signals["icon_spoof"]:   # name the brand it's dressed up as
+        detail = f"Pretends to be {app.icon_spoof} — it uses its icon"
+        app.reasons = [detail if r == REASONS["icon_spoof"] else r
+                       for r in app.reasons]
     if signals["caught_live"]:  # say when, so the customer recognises the moment
         stamp = app.caught_live.strftime("%d %b, %I:%M %p").lstrip("0")
         detail = f"{REASONS['caught_live']} ({stamp})"
@@ -642,6 +655,8 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
         ["dumpsys", "usagestats"])))
     from watch import load_caught   # local import: keeps the parse/score core adb-free
     caught = _safe(lambda: load_caught(now), {})
+    from appicon import known_lookalikes
+    lookalikes = _safe(known_lookalikes, {})
 
     apps = []
     packages = sorted(installers)
@@ -681,6 +696,7 @@ def build_inventory(adb, progress=None, now=None, notif_samples=1):
             data_mb=(data_use.get(uid, 0) // (1024 * 1024)) if uid else 0,
             used_min=usage.get(pkg, 0),
             caught_live=caught.get(pkg),
+            icon_spoof=lookalikes.get(pkg, ""),
         )
         score_app(app, now)
         apps.append(app)
@@ -762,6 +778,17 @@ def demo():
                   caught_live=datetime(2024, 3, 1, 15, 42))
     score_app(bubbles, now)
     assert bubbles.risk == "Low", (bubbles.score, bubbles.reasons)
+
+    # Wearing WhatsApp's icon: Medium on its own (an image hash is a hint), and
+    # HIGH the moment anything else joins it -- here, being sideloaded.
+    fake = App(package="com.free.wa", installer="com.android.vending",
+               first_install=datetime(2020, 1, 1), icon_spoof="WhatsApp")
+    score_app(fake, now)
+    assert fake.risk == "Medium", (fake.score, fake.reasons)
+    assert fake.reasons[0] == "Pretends to be WhatsApp — it uses its icon"
+    fake.installer = None
+    score_app(fake, now)
+    assert fake.risk == "HIGH", (fake.score, fake.reasons)
 
     owners = parse_owners("Device Owner:\n  admin=ComponentInfo{com.mdm.x/.A}\n")
     assert owners == {"device": "com.mdm.x", "profile": None}

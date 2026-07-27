@@ -841,3 +841,47 @@ def test_watch_catches_the_app_drawing_over_the_screen(root, monkeypatch, tmp_pa
     assert "com.adware.pop" in load_caught()
     # Chrome was merely in the foreground; that is not evidence.
     assert "com.android.chrome" not in load_caught()
+
+
+def test_icon_check_only_targets_apps_outside_the_normal_supply_chain(
+        root, monkeypatch, tmp_path):
+    """Pulling an APK is expensive, so the lookalike check is fenced: doubted
+    apps only, and only sideloaded or absent from Play."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 0.8)
+    listed, unlisted = {"listed": True}, {"listed": False}
+
+    def a(pkg="com.x", installer="com.android.vending", risk="Medium"):
+        one = App(package=pkg, installer=installer)
+        one.risk = risk
+        return one
+
+    assert app._icon_check_wanted(a(installer=None), listed, set())
+    assert app._icon_check_wanted(a(), unlisted, set())
+    # Store-installed and on Play: a family member (Chrome Beta), not a fake.
+    assert not app._icon_check_wanted(a(), listed, set())
+    # Play wouldn't say (offline) -> don't pull APKs on a guess.
+    assert not app._icon_check_wanted(a(), None, set())
+    # Nothing the scan doubts, nothing protected, nothing already judged.
+    assert not app._icon_check_wanted(a(installer=None, risk="Low"), listed, set())
+    assert not app._icon_check_wanted(
+        a(pkg="com.google.android.gms", installer=None), listed, set())
+    assert not app._icon_check_wanted(a(installer=None), listed, {"com.x"})
+
+
+def test_icon_verdict_shows_in_the_detail_pane_without_touching_the_score(
+        root, monkeypatch, tmp_path):
+    """Post-scan verdicts are display-only -- a.reasons feeds will_clean's
+    fence and is read by the clean worker, so this thread never writes it."""
+    _wire(gui, monkeypatch, tmp_path)
+    app = gui.AdCleanerApp(root)
+    pump(root, 1.0)
+    target = app.apps[0]
+    before = (target.score, list(target.reasons))
+    app.selected = target
+    app._apply_icon_spoof(target, "WhatsApp")
+    pump(root, 0.2)
+    assert target.icon_spoof == "WhatsApp"
+    assert (target.score, target.reasons) == before
+    assert "WhatsApp" in app.detail_reasons.cget("text")

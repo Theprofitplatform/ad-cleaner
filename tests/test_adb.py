@@ -173,3 +173,26 @@ def test_mdns_discover_swallows_adb_errors():
         def run(self, args, timeout=10):
             raise AdbError("mdns not supported")
     assert mdns_discover(Broken()) == {"connect": [], "pairing": []}
+
+
+def test_friendly_maps_install_failures_before_the_generic_rules():
+    # The reason an old handset can't take a current APK — the message has to
+    # say so, not "the phone refused that action".
+    msg = adb._friendly("adb: failed to install x.apk: Failure [INSTALL_FAILED_OLDER_SDK]")
+    assert "newer Android version" in msg
+    # Codes containing PERMISSION / NOT_INSTALLED must not fall through to the
+    # generic arms below them.
+    assert "INSTALL_FAILED_PERMISSION_MODEL_DOWNGRADE" in adb._friendly(
+        "Failure [INSTALL_FAILED_PERMISSION_MODEL_DOWNGRADE]")
+    assert "space" in adb._friendly("Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]")
+
+
+def test_install_treats_exit_zero_failure_as_an_error():
+    """Old adb prints Failure but still exits 0 — success is read from the text."""
+    class _Old:
+        def run(self, args, timeout=600):
+            return "Failure [INSTALL_FAILED_OLDER_SDK]"
+    a = adb.Adb.__new__(adb.Adb)
+    a.run = _Old().run
+    with pytest.raises(adb.AdbError, match="newer Android version"):
+        a.install("x.apk")

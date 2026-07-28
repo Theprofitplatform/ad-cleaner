@@ -452,6 +452,41 @@ def launch_smart_switch(adb, log=None):
     return result
 
 
+# An old handset's Play Store is often too stale to install anything, so the
+# APK has to come over the cable instead. ponytail: single-file installs only --
+# split bundles (.apkm/.xapk/.apks) are rejected with an explanation rather than
+# unpacked; upgrade path is unzip + `adb install-multiple`.
+INSTALL_TIMEOUT = 600
+_BUNDLE_SUFFIXES = (".apkm", ".xapk", ".apks")
+
+
+def install_apk(adb, apk_path, log=None, expect_package=None):
+    """Install an APK sitting on this PC onto the phone. Returns True.
+
+    `expect_package` is re-queried after the install, so picking the wrong file
+    is reported as a failure instead of a silent success -- on this tool, of all
+    tools, "something installed" is not good enough to call it done.
+    """
+    path = Path(apk_path)
+    if path.suffix.lower() in _BUNDLE_SUFFIXES:
+        raise AdbError(
+            f"{path.name} is an app bundle, not a single APK. Download the "
+            "plain .apk version instead — bundles can't be installed over USB.")
+    if path.suffix.lower() != ".apk":
+        raise AdbError(f"{path.name} isn't an .apk file.")
+    if not path.is_file():
+        raise AdbError(f"{path.name} is gone — pick the file again.")
+    cmd = ["install", "-r", str(path)]
+    adb.install(path, timeout=INSTALL_TIMEOUT)
+    if expect_package and not _is_installed(adb, expect_package):
+        raise AdbError(f"{path.name} installed, but it isn't {expect_package}. "
+                       "That was the wrong APK — check what it actually was.")
+    if log is not None:
+        log.append(adb.serial, expect_package or path.name, "install-apk",
+                   "not installed", cmd, "ok", apk=str(path))
+    return True
+
+
 def reboot(adb, log=None):
     adb.reboot()
     if log is not None:

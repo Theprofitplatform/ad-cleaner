@@ -150,6 +150,20 @@ class Adb:
     def push(self, local, remote, timeout=120):
         return self.run(["push", local, remote], timeout=timeout)
 
+    def install(self, apk, timeout=600):
+        """Install an APK from this PC onto the phone; `-r` reinstalls in place.
+
+        Old adb builds (and some OEM ones) exit 0 even when the install failed,
+        printing "Failure [INSTALL_FAILED_...]" on stdout -- so success is
+        judged from the output text, not the exit code, same as wifi_connect().
+        Newer adb exits nonzero and run() raises first; either way the caller
+        gets an AdbError carrying the mapped INSTALL_FAILED_* reason.
+        """
+        out = self.run(["install", "-r", str(apk)], timeout=timeout)
+        if "success" not in out.lower():
+            raise AdbError(_friendly(out))
+        return out.strip()
+
     def reboot(self, timeout=DEFAULT_TIMEOUT):
         return self.run(["reboot"], timeout=timeout)
 
@@ -230,9 +244,39 @@ def parse_devices(output):
     return devices
 
 
+# `adb install` failure codes, in the words a repair tech can act on. The first
+# one is why this exists: a current APK off the web won't go onto an old handset.
+_INSTALL_ERRORS = {
+    "INSTALL_FAILED_OLDER_SDK":
+        "This app needs a newer Android version than the phone has. "
+        "Download an older build of the APK.",
+    "INSTALL_FAILED_INSUFFICIENT_STORAGE":
+        "Not enough free space on the phone. Clear some space and retry.",
+    "INSTALL_FAILED_VERSION_DOWNGRADE":
+        "A newer version is already on the phone.",
+    "INSTALL_FAILED_UPDATE_INCOMPATIBLE":
+        "A different build of this app is already installed. "
+        "Uninstall it on the phone first.",
+    "INSTALL_FAILED_NO_MATCHING_ABIS":
+        "This APK doesn't support this phone's processor. "
+        "Download the build for this phone's architecture.",
+    "INSTALL_FAILED_TEST_ONLY":
+        "That APK is marked test-only and can't be installed normally.",
+    "INSTALL_PARSE_FAILED_NO_CERTIFICATES":
+        "That APK isn't signed properly — re-download it from a trusted source.",
+}
+_INSTALL_CODE = re.compile(r"INSTALL_(?:FAILED|PARSE_FAILED)_[A-Z_]+")
+
+
 def _friendly(stderr):
     """Map known ADB stderr to plain English (BUILD_PLAN 8)."""
     s = (stderr or "").lower()
+    # Checked before the generic rules below: "...NOT_INSTALLED" / "...PERMISSION"
+    # codes would otherwise be swallowed by the "not installed" / "permission" arms.
+    m = _INSTALL_CODE.search(stderr or "")
+    if m:
+        return _INSTALL_ERRORS.get(
+            m.group(0), "The phone refused to install that app (%s)." % m.group(0))
     if "unauthorized" in s:
         return "Phone not authorized. Tap 'Allow' on the phone."
     if "offline" in s:

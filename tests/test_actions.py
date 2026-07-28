@@ -25,6 +25,8 @@ class FakeAdb:
         self.a11y = ""
         self.pulled = []
         self.pushed = []
+        self.installs = []
+        self.install_yields = None   # package that shows up after a fake install
         self.rebooted = False
         self.calls = []
         self.commands = []
@@ -39,6 +41,12 @@ class FakeAdb:
     def push(self, local, remote, timeout=120):
         self.pushed.append((local, remote))
         return "pushed"
+
+    def install(self, apk, timeout=600):
+        self.installs.append(str(apk))
+        if self.install_yields:
+            self.installed.add(self.install_yields)
+        return "Success"
 
     def reboot(self, timeout=10):
         self.rebooted = True
@@ -641,3 +649,52 @@ def test_delete_file_unsafe_path_never_pulled(log, tmp_path):
     with pytest.raises(ProtectedAppError):
         actions.delete_file(adb, "/data/app/base.apk", log, backup_dir=tmp_path)
     assert not adb.pulled
+
+
+# --- install_apk (Smart Switch onto an old phone) ---------------------------
+
+SS = actions.SMART_SWITCH
+
+
+def test_install_apk_rejects_app_bundle_without_touching_phone(log, tmp_path):
+    bundle = tmp_path / "smartswitch.apkm"
+    bundle.write_bytes(b"PK")
+    adb = FakeAdb()
+    with pytest.raises(AdbError) as e:
+        actions.install_apk(adb, bundle, log, expect_package=SS)
+    assert "bundle" in str(e.value).lower()
+    assert not adb.installs          # never reached the cable
+    assert not log.recent()
+
+
+def test_install_apk_rejects_non_apk(log, tmp_path):
+    other = tmp_path / "notes.txt"
+    other.write_text("hi")
+    adb = FakeAdb()
+    with pytest.raises(AdbError):
+        actions.install_apk(adb, other, log, expect_package=SS)
+    assert not adb.installs
+
+
+def test_install_apk_fails_when_the_wrong_apk_was_picked(log, tmp_path):
+    apk = tmp_path / "something-else.apk"
+    apk.write_bytes(b"PK")
+    adb = FakeAdb()
+    adb.install_yields = "com.some.other.app"   # installs fine, wrong package
+    with pytest.raises(AdbError) as e:
+        actions.install_apk(adb, apk, log, expect_package=SS)
+    assert SS in str(e.value)
+    assert adb.installs                          # it did run
+    assert not log.recent()                      # but is never logged as ok
+
+
+def test_install_apk_success_is_logged(log, tmp_path):
+    apk = tmp_path / "smartswitch.apk"
+    apk.write_bytes(b"PK")
+    adb = FakeAdb()
+    adb.install_yields = SS
+    assert actions.install_apk(adb, apk, log, expect_package=SS) is True
+    entry = log.recent()[0]
+    assert entry["action"] == "install-apk"
+    assert entry["package"] == SS
+    assert entry["apk"] == str(apk)

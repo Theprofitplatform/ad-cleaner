@@ -18,10 +18,10 @@ from tkinter import filedialog, messagebox, ttk
 
 from adb import Adb, AdbError, data_dir, find_adb, mdns_discover, wifi_connect
 from actions import (
-    ActionLog, BACKUP_CAP_MB, DNS_PROVIDERS, ProtectedAppError, backup_apk,
+    ActionLog, BACKUP_CAP_MB, DNS_PROVIDERS, ProtectedAppError, SMART_SWITCH, backup_apk,
     block_browser_popups, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
-    fix_role, force_stop,
+    fix_role, force_stop, install_apk,
     launch_smart_switch, pause, read_private_dns,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
@@ -50,7 +50,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.10.0"
+APP_VERSION = "1.11.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -2979,9 +2979,54 @@ class AdCleanerApp:
             else:
                 self.status_line("Smart Switch isn't on this phone — opened its "
                                  "Play Store page so you can install it.", "warn")
+                self._offer_smart_switch_apk()
         except Exception as e:
             self.status_line("Couldn't open Smart Switch. " + self._friendly(str(e)),
                              "error")
+
+    def _offer_smart_switch_apk(self):
+        """Fallback for old handsets: install Smart Switch from an APK on this PC.
+
+        The Play Store page we just opened is a dead end on anything old enough
+        to need Smart Switch in the first place -- a stale Play Store, or an OS
+        below the current app's minimum, and nothing installs. Pushing the APK
+        down the cable we're already using sidesteps the phone's browser and
+        Play Store entirely.
+        """
+        if not messagebox.askyesno(
+                "Install Smart Switch",
+                "Smart Switch isn't installed on this phone.\n\n"
+                "On an older phone the Play Store often can't install it. If "
+                "you've already downloaded the Smart Switch APK onto this PC, "
+                "pick it now and it'll go over the cable instead.\n\n"
+                "Pick the APK file?", default="no"):
+            return
+        path = filedialog.askopenfilename(
+            title="Pick the Smart Switch APK",
+            filetypes=[("Android app", "*.apk"), ("All files", "*.*")])
+        if not path:
+            return
+        self.busy = True
+        self.status_line("Installing Smart Switch — this can take a minute…")
+
+        def work():
+            try:
+                install_apk(self.adb, path, self.log, expect_package=SMART_SWITCH)
+                self._post(self._smart_switch_apk_done, None)
+            except (AdbError, OSError) as e:
+                self._post(self._smart_switch_apk_done, str(e))
+
+        self._run_bg(work)
+
+    def _smart_switch_apk_done(self, err):
+        self.busy = False
+        self._refresh_history()
+        if err:
+            self.status_line("Couldn't install Smart Switch. " + self._friendly(err),
+                             "error")
+        else:
+            self.status_line("✅ Smart Switch installed — press the button again "
+                             "to open it on the phone.", "good")
 
     def on_chrome_popups(self):
         """One-click fix for fake-virus site-notification spam, in every

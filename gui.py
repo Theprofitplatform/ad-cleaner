@@ -21,13 +21,14 @@ from actions import (
     ActionLog, BACKUP_CAP_MB, DNS_PROVIDERS, ProtectedAppError, backup_apk,
     block_browser_popups, block_notifications, can_undo,
     clean_risky, clear_caches, clear_private_dns, debloat, delete_file, disable_accessibility,
-    fix_role, force_stop,
-    launch_smart_switch, pause, read_private_dns,
+    fix_role, force_stop, install_tool,
+    launch_smart_switch, list_tools, pause, read_private_dns, tools_dir,
     reboot, reset_app_data, restrict_background, resume, set_private_dns, stop_all, undo,
     uninstall, will_clean,
 )
 from bloatware import find_bloat
 from crashes import read_crash_report, summarize
+import migrate
 from battery import read_battery_report, summarize as battery_summarize
 from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
                     read_resource_report)
@@ -50,7 +51,7 @@ import usbinfo
 
 # Bumped on every user-facing PR (GO workflow), so a bench machine or a
 # customer screenshot tells you exactly which exe it is.
-APP_VERSION = "1.10.0"
+APP_VERSION = "1.11.0"
 
 # Startup update check (packaged exe only; silent when offline).
 RELEASES_API = "https://api.github.com/repos/Theprofitplatform/ad-cleaner/releases/latest"
@@ -198,6 +199,42 @@ def _pull_media(adb, dest):
     return saved, skipped, failed
 
 
+def _pull_extras(adb, dest):
+    """Recover SIM contacts + SMS/MMS into the same save folder (migrate.py).
+
+    Best-effort on purpose: most phones have no vendor backup to convert, and a
+    miss here must never fail a media transfer that already worked. Returns the
+    counts so the caller can mention them, or {} if nothing came back.
+    """
+    try:
+        return migrate.harvest_extras(adb, dest)
+    except Exception:
+        return {}
+
+
+def _extras_line(extras):
+    """One line summarising what _pull_extras recovered, or '' if nothing.
+
+    SMS needs a manual step on the new phone (only the default SMS app may write
+    messages), so say so here rather than let a tech assume it lands by itself.
+    """
+    extras = extras or {}
+    bits = []
+    if extras.get("sim_contacts"):
+        bits.append(f"{extras['sim_contacts']} SIM contacts")
+    if extras.get("mms_media"):
+        bits.append(f"{extras['mms_media']} pictures from messages")
+    if extras.get("sms"):
+        bits.append(f"{extras['sms']} text messages")
+    if not bits:
+        return ""
+    line = "Also recovered: " + ", ".join(bits) + ".\n"
+    if extras.get("sms"):
+        line += ("Texts need “SMS Backup & Restore” (SyncTech) on the new phone — "
+                 "restore Download/sms-restore.xml with it.\n")
+    return line
+
+
 def _push_media(adb, src):
     """Copy each subfolder of a saved transfer folder back onto the phone."""
     src = Path(src)
@@ -210,6 +247,11 @@ def _push_media(adb, src):
             pushed.append(child.name)
         except AdbError:
             failed.append(child.name)
+    # Files arriving by `adb push` are invisible to the Gallery until MediaStore
+    # indexes them — field-seen on a Galaxy A11: 119 photos on disk, none in the
+    # Gallery, until this ran. Best-effort; the files are already safely there.
+    if pushed:
+        migrate.scan_media(adb)
     return pushed, failed
 
 
@@ -739,18 +781,113 @@ class AdCleanerApp:
         ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(18, 12))
         ttk.Label(tab, text="📇  Contacts, messages & apps",
                   font=(FONT, 12, "bold")).pack(anchor="w")
-        ttk.Label(tab, text="These can't move over the USB cable — Android protects them. "
-                            "The easy, built-in way:\n"
-                            "•  Contacts & calendar: sign into the same Google account on the "
-                            "new phone and they come back on their own.\n"
-                            "•  Apps, texts and the rest: use the new phone's own “Copy apps "
-                            "& data” wizard during setup (on Samsung it's “Smart Switch”). "
-                            "It moves the lot, with a cable between the two phones — no PC "
-                            "needed.",
+        ttk.Label(tab, text="•  Texts: Android won't let a PC read them off the phone. But if "
+                            "the OLD phone has its own backup app (ZTE Backup, LG Mobile "
+                            "Switch, Alcatel Backup), run it and back up messages to storage "
+                            "BEFORE Step 1 — Save then finds what it wrote and turns it into "
+                            "Download/sms-restore.xml. On the new phone, install “SMS Backup "
+                            "& Restore” (SyncTech) and restore that file.\n"
+                            "•  SIM contacts come across on their own; contacts in phone "
+                            "memory ride on the Google account — sign in on the new phone.\n"
+                            "•  Apps are deliberately NOT copied: on a phone you're cleaning "
+                            "of ad malware, moving the apps moves the problem. Use the new "
+                            "phone's own “Copy apps & data” wizard if the owner wants them.",
                   style="Muted.TLabel", wraplength=820, justify="left").pack(
             anchor="w", pady=(2, 8))
-        self._flat_button(tab, "🔗  How to move contacts & apps (opens a guide)",
-                          self.on_move_guide, SLATE, SLATE_HOT).pack(anchor="w")
+        guide_row = ttk.Frame(tab)
+        guide_row.pack(anchor="w")
+        self._flat_button(guide_row, "🔗  How to move contacts & apps (opens a guide)",
+                          self.on_move_guide, SLATE, SLATE_HOT).pack(side="left",
+                                                                     padx=(0, 8))
+        self.tools_btn = self._flat_button(guide_row, "📦  Install a tool",
+                                           self.on_install_tool, SLATE, SLATE_HOT)
+        self.tools_btn.pack(side="left")
+        self.move_btns = self.move_btns + (self.tools_btn,)
+        self._enable_btn(self.tools_btn, False)
+
+    def on_install_tool(self):
+        """Install one of the APKs the shop has vetted into adcleaner_data/tools/.
+
+        Deliberately not a file picker: this app exists to strip sideloaded junk
+        off phones, so it only installs from a folder someone vetted first.
+        """
+        if self.busy or not self.serial:
+            return
+        folder = tools_dir()
+        entries = list_tools(folder)
+        if not entries:
+            if messagebox.askyesno(
+                    "No tools yet",
+                    "No APKs have been added yet.\n\nPut the APK files you trust in:\n"
+                    f"{folder}\n\nOpen that folder now?", default="yes"):
+                webbrowser.open(folder.as_uri())
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Install a tool")
+        win.configure(bg=BASE)
+        win.transient(self.root)
+        win.grab_set()
+        ttk.Label(win, justify="left", wraplength=430, text=(
+            f"Install onto “{self.model or self.serial}”.\n"
+            "Only APKs you have put in the tools folder appear here.")).pack(
+            anchor="w", padx=14, pady=(12, 8))
+        picks = []
+        for e in entries:
+            var = tk.BooleanVar(value=False)
+            picks.append((var, e))
+            label = "%s   (%.1f MB%s)" % (e["name"], e["size"] / 1048576,
+                                          ", %d parts" % len(e["paths"])
+                                          if len(e["paths"]) > 1 else "")
+            ttk.Checkbutton(win, text=label, variable=var).pack(anchor="w", padx=18)
+        status = ttk.Label(win, text="", wraplength=430, justify="left")
+        status.pack(anchor="w", padx=14, pady=(8, 0))
+
+        row = ttk.Frame(win)
+        row.pack(anchor="e", padx=14, pady=12)
+        busy = {"v": False}
+
+        def done(installed, errors):
+            busy["v"] = False
+            if not win.winfo_exists():
+                return
+            if errors and not installed:
+                status.config(text="Couldn't install: " + "; ".join(errors))
+                return
+            win.destroy()
+            msg = "✅ Installed " + ", ".join(installed) if installed else ""
+            if errors:
+                msg += ("  —  failed: " + "; ".join(errors)) if msg else \
+                    "Couldn't install: " + "; ".join(errors)
+            self.status_line(msg, "good" if installed and not errors else "error")
+
+        def go():
+            if busy["v"]:
+                return
+            chosen = [e for var, e in picks if var.get()]
+            if not chosen:
+                status.config(text="Tick at least one.")
+                return
+            busy["v"] = True
+            status.config(text="Installing… leave the phone plugged in.")
+
+            def work():
+                installed, errors = [], []
+                for e in chosen:
+                    try:
+                        install_tool(self.adb, e, self.log)
+                        installed.append(e["name"])
+                    except (AdbError, OSError) as err:
+                        errors.append(f"{e['name']}: {err}")
+                self._post(done, installed, errors)
+
+            self._run_bg(work)
+
+        self._flat_button(row, "Install", go, GREEN, GREEN_HOT).pack(side="left",
+                                                                    padx=(0, 8))
+        self._flat_button(row, "Open tools folder",
+                          lambda: webbrowser.open(folder.as_uri()),
+                          SLATE, SLATE_HOT).pack(side="left")
 
     def on_move_save(self):
         if self.busy or not self.serial:
@@ -768,15 +905,17 @@ class AdCleanerApp:
         def work():
             try:
                 saved, skipped, failed = _pull_media(self.adb, dest)
+                # Contacts/SMS ride along in the same folder; never fatal.
+                extras = _pull_extras(self.adb, dest)
                 if not failed:
                     (dest / TRANSFER_DONE_MARK).write_text("ok", encoding="utf-8")
-                self._post(self._move_save_done, dest, saved, failed, None)
+                self._post(self._move_save_done, dest, saved, failed, None, extras)
             except Exception as e:
-                self._post(self._move_save_done, dest, [], [], str(e))
+                self._post(self._move_save_done, dest, [], [], str(e), {})
 
         self._run_bg(work)
 
-    def _move_save_done(self, dest, saved, failed, err):
+    def _move_save_done(self, dest, saved, failed, err, extras=None):
         self.busy = False
         for b in self.move_btns:
             self._enable_btn(b, bool(self.serial))
@@ -799,8 +938,9 @@ class AdCleanerApp:
             self.status_line("No photos or files found to copy.", "error")
             return
         self._last_transfer_dir = dest
-        self.move_status.set(f"✅ Saved {', '.join(saved)} to:\n{dest}\n\n"
-                             "Now unplug this phone, plug in the NEW phone, and press "
+        self.move_status.set(f"✅ Saved {', '.join(saved)} to:\n{dest}\n"
+                             + _extras_line(extras) +
+                             "\nNow unplug this phone, plug in the NEW phone, and press "
                              "“Copy onto the new phone”.")
         self.status_line(f"✅ Saved {len(saved)} folder(s) to {dest}", "good")
 

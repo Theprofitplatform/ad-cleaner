@@ -18,6 +18,15 @@ class FakePullPush:
     def __init__(self, present):
         self.present = set(present)   # folder names that "exist" on the phone
         self.pulled, self.pushed = [], []
+        self.scanned = False
+
+    def shell_text(self, args, timeout=10):
+        # _push_media asks MediaStore to reindex; without it the restored
+        # photos sit on disk invisible to the Gallery.
+        if "scan_volume" in " ".join(args):
+            self.scanned = True
+            return "Result: Bundle[{}]"
+        raise AdbError("unexpected: " + " ".join(args))
 
     def pull(self, remote, local, timeout=120):
         from pathlib import Path
@@ -71,3 +80,4 @@ def test_push_media_sends_only_subfolders(tmp_path):
     pushed, failed = gui._push_media(adb, src)
     assert set(pushed) == {"DCIM", "Music"}
     assert failed == []
+    assert adb.scanned, "pushed files stay invisible to the Gallery without a rescan"

@@ -30,7 +30,8 @@ from bloatware import find_bloat
 from crashes import read_crash_report, summarize
 import migrate
 from battery import read_battery_report, summarize as battery_summarize
-from device import (GB, read_battery_report, read_big_files, read_charging, read_device_stats,
+from device import (GB, parse_df, read_battery_report, read_big_files, read_charging,
+                    read_device_stats,
                     read_resource_report)
 from report import render_history_html, render_intake_html, render_receipt_html
 from protected import is_blocked
@@ -200,16 +201,33 @@ def _pull_media(adb, dest):
 
 
 def _pull_extras(adb, dest):
-    """Recover SIM contacts + SMS/MMS into the same save folder (migrate.py).
+    """Recover contacts, SMS/MMS and stray app media into the save folder.
 
     Best-effort on purpose: most phones have no vendor backup to convert, and a
     miss here must never fail a media transfer that already worked. Returns the
     counts so the caller can mention them, or {} if nothing came back.
     """
     try:
-        return migrate.harvest_extras(adb, dest)
+        return migrate.harvest_extras(
+            adb, dest, covered=[REMOTE_BASE + n for n in TRANSFER_FOLDERS])
     except Exception:
         return {}
+
+
+def space_warning(phone_used, pc_free, headroom=1.10):
+    """Warn before a save that cannot fit. '' when there is room.
+
+    A phone fuller than the PC's free space fails partway through, and the tech
+    sees a folder-level error with no hint why -- easy to misread as a cable
+    fault on a phone that is about to be wiped.
+    """
+    if not phone_used or pc_free is None:
+        return ""            # unknown either side: say nothing rather than cry wolf
+    if pc_free >= phone_used * headroom:
+        return ""
+    return ("This PC has %.1f GB free but the phone is holding about %.1f GB. "
+            "Free up space first, or the save may stop part-way."
+            % (pc_free / GB, phone_used / GB))
 
 
 def _extras_line(extras):
@@ -220,8 +238,10 @@ def _extras_line(extras):
     """
     extras = extras or {}
     bits = []
-    if extras.get("sim_contacts"):
-        bits.append(f"{extras['sim_contacts']} SIM contacts")
+    if extras.get("contacts"):
+        bits.append(f"{extras['contacts']} contacts")
+    if extras.get("other_media"):
+        bits.append(f"{extras['other_media']} app pictures (WhatsApp etc.)")
     if extras.get("mms_media"):
         bits.append(f"{extras['mms_media']} pictures from messages")
     if extras.get("sms"):
@@ -889,12 +909,25 @@ class AdCleanerApp:
                           lambda: webbrowser.open(folder.as_uri()),
                           SLATE, SLATE_HOT).pack(side="left")
 
+    def _space_warning(self):
+        """Compare the phone's shared storage against free space on this PC."""
+        try:
+            used = parse_df(self.adb.shell_text(["df", "/sdcard"]), mount=None)[1]
+            free = shutil.disk_usage(str(data_dir())).free
+        except (AdbError, OSError, ValueError, IndexError):
+            return ""      # can't tell -- never block the save on a failed check
+        return space_warning(used, free)
+
     def on_move_save(self):
         if self.busy or not self.serial:
             return
         base = self.model or self.serial or "phone"
         safe = "".join(c if c.isalnum() else "_" for c in base).strip("_") or "phone"
         dest = data_dir() / "transfers" / f"{safe}_{datetime.now():%Y%m%d_%H%M%S}"
+        warn = self._space_warning()
+        if warn and not messagebox.askyesno("Not much room left", warn +
+                                            "\n\nStart the save anyway?", default="no"):
+            return
         self.busy = True
         for b in self.move_btns:
             self._enable_btn(b, False)

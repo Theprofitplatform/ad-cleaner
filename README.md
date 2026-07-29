@@ -196,8 +196,10 @@ is deleted from either phone.
 
 Saving also picks up, when it can:
 
-- **SIM contacts** → `Download/contacts-sim.vcf`. Open it on the new phone to
-  import, or just move the SIM across.
+- **Contacts** — SIM *and* phone memory, merged → `Download/contacts.vcf`. Open
+  it on the new phone to import.
+- **WhatsApp / Signal / Telegram pictures** → `OtherMedia/`. Since Android 11
+  these live outside the normal photo folders, so they'd otherwise be missed.
 - **Texts and picture messages** → but only if the old phone already made a
   backup of them (see below).
 

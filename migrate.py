@@ -7,10 +7,12 @@ rescan that makes restored files actually appear in the Gallery.
 
 What is and isn't readable over ADB on an unrooted phone:
 
-  photos/videos  yes -- handled by gui.TRANSFER_FOLDERS
+  photos/videos  yes -- gui.TRANSFER_FOLDERS, plus extra_media_dirs() for the
+                       app folders that list misses (WhatsApp, Signal, Telegram)
   SIM contacts   yes -- content://icc/adn is world-readable
-  phone contacts no -- but they are nearly always synced to the Google account,
-                       so they arrive on the new phone at sign-in
+  phone contacts yes -- content://com.android.contacts/data. adb shell holds
+                       READ_CONTACTS; only SMS is genuinely off limits. Owners
+                       who never signed into Google have contacts ONLY here.
   SMS/MMS        no -- the provider requires READ_SMS, which adb shell lacks
 
 SMS is the catch, and the way through is indirect: nearly every old handset
@@ -37,6 +39,17 @@ STORAGE_ROOTS = ["/sdcard", "/storage/sdcard1", "/storage/extSdCard", "/storage/
 # Recovered MMS pictures go under DCIM/ so the Gallery indexes them, in their
 # own folder so message attachments stay separate from the camera roll.
 MMS_FOLDER = "DCIM/OldPhone-MMS"
+
+# App media the standard folder list never reaches lands here, one subfolder per
+# source, so Step 2 restores it as /sdcard/OtherMedia/<name>/.
+OTHER_MEDIA_FOLDER = "OtherMedia"
+
+CONTACT_PHONE_MIME = "vnd.android.cursor.item/phone_v2"
+
+MEDIA_URIS = [
+    "content://media/external/images/media",
+    "content://media/external/video/media",
+]
 
 BOX_TYPE = {
     "INBOX": 1, "SENT": 2, "SENDBOX": 2, "SENTBOX": 2,
@@ -230,6 +243,43 @@ def parse_sim_rows(text):
     return out
 
 
+def parse_contact_rows(text):
+    """content://com.android.contacts/data rows -> [(name, number)].
+
+    Only phone-number rows; the same table also holds emails, addresses and
+    photos. Field order follows the projection this module asks for.
+    """
+    out = []
+    for line in text.splitlines():
+        if not line.startswith("Row:"):
+            continue
+        m = re.search(r"display_name=(.*?), data1=(.*?), mimetype=(\S*)", line)
+        if not m or m.group(3) != CONTACT_PHONE_MIME:
+            continue
+        name, number = m.group(1).strip(), m.group(2).strip()
+        if number and number != "NULL":
+            out.append((name if name and name != "NULL" else number, number))
+    return out
+
+
+def _dial_key(number):
+    """Compare numbers ignoring spacing/punctuation, so '+61 400 000 000' and
+    '+61400000000' are one contact rather than two."""
+    return re.sub(r"[^0-9+]", "", number or "")
+
+
+def merge_contacts(*groups):
+    """Union several [(name, number)] lists, first spelling of a number wins."""
+    seen, out = set(), []
+    for group in groups:
+        for name, number in group:
+            key = (name.strip().lower(), _dial_key(number))
+            if key not in seen:
+                seen.add(key)
+                out.append((name, number))
+    return out
+
+
 def to_vcf(pairs):
     lines = []
     for name, number in pairs:
@@ -238,9 +288,101 @@ def to_vcf(pairs):
     return "\r\n".join(lines) + "\r\n" if lines else ""
 
 
+def read_contacts(adb):
+    """Every contact the phone will hand over: SIM + phone memory, merged.
+
+    Contacts in phone memory are the ones at risk -- an owner who never signed
+    into a Google account has them nowhere else.
+    """
+    sim = phone = []
+    try:
+        sim = parse_sim_rows(adb.shell_text(
+            ["content", "query", "--uri", "content://icc/adn",
+             "--projection", "name:number"], timeout=30))
+    except AdbError:
+        sim = []
+    try:
+        phone = parse_contact_rows(adb.shell_text(
+            ["content", "query", "--uri", "content://com.android.contacts/data",
+             "--projection", "display_name:data1:mimetype"], timeout=60))
+    except AdbError:
+        phone = []
+    return merge_contacts(phone, sim)
+
+
 # --------------------------------------------------------------------------
 # Device-side helpers
 # --------------------------------------------------------------------------
+
+def parse_media_paths(text):
+    """`content query ... --projection _data` output -> list of device paths."""
+    return [m.group(1).strip() for m in re.finditer(r"^Row:.*?_data=(.*)$", text, re.M)]
+
+
+def _norm(path):
+    """/storage/emulated/0/... and /sdcard/... are the same place."""
+    for prefix in ("/storage/emulated/0/", "/storage/self/primary/"):
+        if path.startswith(prefix):
+            return "/sdcard/" + path[len(prefix):]
+    return path
+
+
+def extra_media_dirs(adb, covered=(), limit=40):
+    """Folders holding photos/videos that `covered` does not already include.
+
+    Asking MediaStore beats guessing: since Android 11 WhatsApp keeps its
+    pictures in /sdcard/Android/media/com.whatsapp/... -- outside DCIM,
+    Pictures, Movies and every other name on the standard list. Signal and
+    Telegram do the same. For most customers that is the folder they care about
+    most, and a fixed folder list silently skips it.
+
+    Returns [(device_path, file_count)], busiest first.
+    """
+    roots = tuple(_norm(c).rstrip("/") + "/" for c in covered)
+    counts = {}
+    for uri in MEDIA_URIS:
+        try:
+            out = adb.shell_text(
+                ["content", "query", "--uri", uri, "--projection", "_data"],
+                timeout=120)
+        except AdbError:
+            continue
+        for raw in parse_media_paths(out):
+            path = _norm(raw)
+            if not path.startswith("/"):
+                continue
+            folder = path.rsplit("/", 1)[0]
+            # Thumbnail caches are hundreds of junk files; originals live elsewhere.
+            if ".thumbnails" in folder or folder.startswith(roots):
+                continue
+            counts[folder] = counts.get(folder, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ranked[:limit]
+
+
+def _short(segment):
+    """'org.thoughtcrime.securesms' -> 'securesms'; anything else unchanged.
+
+    Discovered folders sit under a package name, which makes a dreadful folder
+    name on the new phone.
+    """
+    if re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+){2,}", segment or "", re.I):
+        return segment.rsplit(".", 1)[-1]
+    return segment
+
+
+def label_for(device_path, taken=()):
+    """A short folder name for a discovered media dir, unique within `taken`."""
+    parts = [_short(p) for p in device_path.strip("/").split("/") if p]
+    base = _safe(parts[-1]) if parts else "media"
+    if base.lower() in ("media", "files", "images", "video", "videos") and len(parts) > 1:
+        base = _safe(parts[-2] + "-" + parts[-1])
+    name, n = base, 2
+    while name in taken:
+        name = "%s-%d" % (base, n)
+        n += 1
+    return name
+
 
 def parse_glob_listing(text, suffix):
     """Keep real paths from an `ls -d <globs>` run.
@@ -301,33 +443,47 @@ def scan_media(adb):
 # The two halves of the job
 # --------------------------------------------------------------------------
 
-def harvest_extras(adb, dest):
-    """Recover SIM contacts, SMS and MMS pictures into an existing save folder.
+def harvest_extras(adb, dest, covered=()):
+    """Recover contacts, SMS, MMS pictures and stray app media into a save folder.
 
     Runs alongside gui._pull_media, writing into the same folder so Step 2
     pushes everything back without knowing the difference:
 
-        <dest>/Download/contacts-sim.vcf   import on the new phone
+        <dest>/Download/contacts.vcf       import on the new phone
         <dest>/Download/sms-restore.xml    for SMS Backup & Restore
         <dest>/DCIM/OldPhone-MMS/          pictures pulled out of MMS
+        <dest>/OtherMedia/<app>/           WhatsApp &co, missed by the folder list
 
-    Never raises -- a phone with no vendor backup simply yields zeros, and that
-    must not fail the media transfer that already succeeded.
+    `covered` is the folder list the caller already pulled, so media is not
+    fetched twice. Never raises -- a phone with no vendor backup simply yields
+    zeros, and that must not fail a media transfer that already succeeded.
     """
     dest = Path(dest)
-    found = {"sim_contacts": 0, "sms": 0, "mms_media": 0, "sources": []}
+    found = {"contacts": 0, "sms": 0, "mms_media": 0, "other_media": 0,
+             "sources": []}
 
-    try:
-        rows = parse_sim_rows(adb.shell_text(
-            ["content", "query", "--uri", "content://icc/adn",
-             "--projection", "name:number"], timeout=30))
-    except AdbError:
-        rows = []
+    rows = read_contacts(adb)
     if rows:
         d = dest / "Download"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "contacts-sim.vcf").write_text(to_vcf(rows), encoding="utf-8", newline="")
-        found["sim_contacts"] = len(rows)
+        (d / "contacts.vcf").write_text(to_vcf(rows), encoding="utf-8", newline="")
+        found["contacts"] = len(rows)
+
+    try:
+        extras = extra_media_dirs(adb, covered)
+    except AdbError:
+        extras = []
+    taken = set()
+    for device_path, _count in extras:
+        name = label_for(device_path, taken)
+        taken.add(name)
+        local = dest / OTHER_MEDIA_FOLDER / name
+        local.mkdir(parents=True, exist_ok=True)
+        try:
+            adb.pull(device_path, str(local), timeout=1800)
+            found["other_media"] += sum(1 for p in local.rglob("*") if p.is_file())
+        except AdbError:
+            continue
 
     try:
         backups = find_vendor_backups(adb)

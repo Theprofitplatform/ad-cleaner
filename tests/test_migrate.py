@@ -37,15 +37,25 @@ MMS_VMSG = (
 class FakeAdb:
     """Minimal ADB: canned shell output plus a pull that writes a local file."""
 
-    def __init__(self, sim_rows="", backups=(), payload=""):
+    def __init__(self, sim_rows="", backups=(), payload="", contact_rows="",
+                 media_paths=()):
         self.sim_rows, self.backups, self.payload = sim_rows, backups, payload
-        self.shell_calls = []
+        self.contact_rows, self.media_paths = contact_rows, list(media_paths)
+        self.shell_calls, self.pulled = [], []
 
     def shell_text(self, args, timeout=10):
         cmd = " ".join(args)
         self.shell_calls.append(cmd)
         if "icc/adn" in cmd:
             return self.sim_rows
+        if "com.android.contacts" in cmd:
+            return self.contact_rows
+        if "images/media" in cmd:
+            return self._rows(r for r in self.media_paths
+                              if not r.lower().endswith((".mp4", ".3gp")))
+        if "video/media" in cmd:
+            return self._rows(r for r in self.media_paths
+                              if r.lower().endswith((".mp4", ".3gp")))
         if cmd.startswith("ls -d"):
             # Real sh leaves non-matching globs as literal patterns.
             globs = [g for g in cmd.split() if "*" in g]
@@ -54,10 +64,19 @@ class FakeAdb:
             return "Result: Bundle[{}]"
         raise AdbError("unexpected: " + cmd)
 
+    @staticmethod
+    def _rows(paths):
+        return "".join("Row: %d _data=%s\n" % (i, p) for i, p in enumerate(paths))
+
     def pull(self, remote, local, timeout=120):
         from pathlib import Path
-        Path(local).parent.mkdir(parents=True, exist_ok=True)
-        Path(local).write_text(self.payload, encoding="latin-1")
+        self.pulled.append(remote)
+        p = Path(local)
+        if p.is_dir():                      # directory pull, as adb does it
+            (p / "pulled.jpg").write_bytes(b"x")
+            return "1 file pulled"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self.payload, encoding="latin-1")
         return "1 file pulled"
 
 
@@ -156,13 +175,43 @@ def test_harvest_extras_writes_all_three(tmp_path):
         backups=["/storage/sdcard1/backup/Sms/sms.vmsg"],
         payload=SMS_VMSG + MMS_VMSG)
     got = migrate.harvest_extras(adb, tmp_path)
-    assert got["sim_contacts"] == 1
+    assert got["contacts"] == 1
     assert got["sms"] == 2
     assert got["mms_media"] == 2
-    assert (tmp_path / "Download" / "contacts-sim.vcf").exists()
+    assert (tmp_path / "Download" / "contacts.vcf").exists()
     assert (tmp_path / "Download" / "sms-restore.xml").exists()
     # MMS pictures land under DCIM/ so the new phone's Gallery indexes them.
     assert list((tmp_path / migrate.MMS_FOLDER).iterdir())
+
+
+def test_harvest_extras_merges_phone_and_sim_contacts(tmp_path):
+    """Phone-memory contacts are the ones at risk: an owner who never signed
+    into Google has them nowhere else. Same number in both = one contact."""
+    adb = FakeAdb(
+        sim_rows="Row: 0 name=Jo, number=+61 400 000 000, emails=NULL, anrs=NULL, _id=1\n",
+        contact_rows=(
+            "Row: 0 display_name=Jo, data1=+61400000000, "
+            "mimetype=vnd.android.cursor.item/phone_v2\n"
+            "Row: 1 display_name=Ann, data1=+61411111111, "
+            "mimetype=vnd.android.cursor.item/phone_v2\n"
+            "Row: 2 display_name=Ann, data1=ann@example.com, "
+            "mimetype=vnd.android.cursor.item/email_v2\n"))
+    got = migrate.harvest_extras(adb, tmp_path)
+    assert got["contacts"] == 2          # Jo deduped, email row ignored
+    vcf = (tmp_path / "Download" / "contacts.vcf").read_text(encoding="utf-8")
+    assert "FN:Ann" in vcf and "ann@example.com" not in vcf
+
+
+def test_harvest_extras_pulls_app_media_the_folder_list_misses(tmp_path):
+    """WhatsApp keeps pictures outside DCIM/Pictures/Movies since Android 11."""
+    wa = "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images"
+    adb = FakeAdb(media_paths=[wa + "/IMG-1.jpg", wa + "/IMG-2.jpg",
+                               "/storage/emulated/0/DCIM/Camera/a.jpg"])
+    got = migrate.harvest_extras(adb, tmp_path, covered=["/sdcard/DCIM"])
+    assert got["other_media"] == 1       # the fake pull writes one file
+    # DCIM was already covered by the caller and must not be fetched twice.
+    assert [p for p in adb.pulled if "DCIM" in p] == []
+    assert any("WhatsApp" in p for p in adb.pulled)
 
 
 def test_harvest_extras_survives_a_phone_with_nothing(tmp_path):
@@ -173,8 +222,43 @@ def test_harvest_extras_survives_a_phone_with_nothing(tmp_path):
             raise AdbError("No phone detected.")
 
     got = migrate.harvest_extras(Dead(), tmp_path)
-    assert got == {"sim_contacts": 0, "sms": 0, "mms_media": 0, "sources": []}
+    assert got == {"contacts": 0, "sms": 0, "mms_media": 0, "other_media": 0,
+                   "sources": []}
     assert not (tmp_path / "Download").exists()
+
+
+def test_extra_media_dirs_ranks_and_skips_thumbnails():
+    wa = "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images"
+    adb = FakeAdb(media_paths=[
+        wa + "/a.jpg", wa + "/b.jpg", wa + "/c.jpg",
+        "/storage/emulated/0/Pictures/Screenshots/s.png",
+        "/storage/emulated/0/DCIM/.thumbnails/t.jpg",     # cache, never wanted
+        "/storage/emulated/0/DCIM/Camera/x.jpg",          # covered by caller
+    ])
+    got = migrate.extra_media_dirs(adb, covered=["/sdcard/DCIM"])
+    # Paths come back normalised: /storage/emulated/0 and /sdcard are one place.
+    assert got[0] == (wa.replace("/storage/emulated/0", "/sdcard"), 3)
+    assert all(".thumbnails" not in d for d, _ in got)
+    assert all("/DCIM/" not in d for d, _ in got)         # caller already has it
+    assert any("Screenshots" in d for d, _ in got)
+
+
+@pytest.mark.parametrize("path,want", [
+    ("/sdcard/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
+     "WhatsApp_Images"),
+    ("/sdcard/Pictures/Screenshots", "Screenshots"),
+    # A bare "Media"/"Images" leaf says nothing; keep its parent for context.
+    ("/sdcard/Android/media/org.thoughtcrime.securesms/Media", "securesms-Media"),
+])
+def test_label_for(path, want):
+    assert migrate.label_for(path) == want
+
+
+def test_label_for_breaks_ties():
+    taken = set()
+    a = migrate.label_for("/sdcard/one/Screenshots", taken); taken.add(a)
+    b = migrate.label_for("/sdcard/two/Screenshots", taken)
+    assert (a, b) == ("Screenshots", "Screenshots-2")
 
 
 def test_scan_media_reports_failure_without_raising():

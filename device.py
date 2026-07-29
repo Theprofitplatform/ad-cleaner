@@ -18,13 +18,19 @@ def parse_meminfo(text):
     return kb("MemTotal"), kb("MemAvailable")
 
 
-def parse_df(text):
-    """`df /data` -> (total_bytes, used_bytes, free_bytes). 0s if unparsable."""
+def parse_df(text, mount="/data"):
+    """`df <path>` -> (total_bytes, used_bytes, free_bytes). 0s if unparsable.
+
+    `mount=None` accepts whatever filesystem df reported, for paths whose mount
+    point isn't predictable: shared storage shows up as /storage/emulated on a
+    modern phone but /storage/sdcard0 on an older one.
+    """
     for line in text.splitlines():
         f = line.split()
         # Android 16 / One UI reports the mount point as /data/user/0
         if (len(f) >= 6 and f[-5].isdigit()
-                and (f[-1] == "/data" or f[-1].startswith("/data/"))):
+                and (mount is None or f[-1] == mount
+                     or f[-1].startswith(mount.rstrip("/") + "/"))):
             total, used, avail = (int(f[-5]) * 1024, int(f[-4]) * 1024,
                                   int(f[-3]) * 1024)
             return total, used, avail

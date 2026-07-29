@@ -413,6 +413,120 @@ def restrict_background(adb, package, uid, log):
     return True
 
 
+# --- Installing vetted tools ------------------------------------------------
+# Techs need a few apps ON the customer's phone (SMS Backup & Restore to move
+# texts, a file manager). Sideloading whatever a mirror site serves is how the
+# phones we clean got infected in the first place, so this installs only from
+# adcleaner_data/tools/ -- a folder the shop vets once, not an open file picker.
+#
+# Drop a plain .apk in there, or unpack an .xapk/.apks bundle into a subfolder
+# and every .apk inside is installed together as splits.
+TOOLS_README = (
+    "Put APK files here to install them on a phone from the Tools button.\n\n"
+    "Only put APKs here you have checked yourself -- anything in this folder\n"
+    "can be installed onto a customer's phone in one click.\n\n"
+    "A plain app.apk is one tool. For an .xapk/.apks/.apkm bundle, unzip it\n"
+    "into a subfolder here and all the .apk files inside install together.\n"
+)
+
+# `adb install` prints Failure but has historically still exited 0, same trap as
+# `adb connect` (see adb.wifi_connect) -- so success is read from the output.
+_INSTALL_HINTS = {
+    "INSTALL_FAILED_ALREADY_EXISTS": "That app is already installed.",
+    "INSTALL_FAILED_VERSION_DOWNGRADE":
+        "The phone has a newer version. Uninstall it first.",
+    "INSTALL_FAILED_MISSING_SPLIT":
+        "This is only part of a split app. Unzip the whole .xapk/.apks bundle "
+        "into one subfolder so every piece installs together.",
+    "INSTALL_FAILED_NO_MATCHING_ABIS":
+        "This APK is built for a different processor. Get the armeabi-v7a build "
+        "for older phones.",
+    "INSTALL_FAILED_OLDER_SDK": "This app needs a newer version of Android.",
+    "INSTALL_FAILED_INSUFFICIENT_STORAGE": "The phone is out of storage.",
+    "INSTALL_PARSE_FAILED": "That file isn't a valid APK.",
+}
+
+
+def tools_dir():
+    """The vetted-APK folder, created with a README the first time it's used."""
+    d = data_dir() / "tools"
+    d.mkdir(parents=True, exist_ok=True)
+    readme = d / "README.txt"
+    if not readme.exists():
+        readme.write_text(TOOLS_README, encoding="utf-8")
+    return d
+
+
+def list_tools(directory=None):
+    """Installable entries in the tools folder -> [{name, paths, size}].
+
+    A top-level .apk is one tool; a subfolder of .apk files is one split app.
+    """
+    d = Path(directory) if directory else tools_dir()
+    if not d.is_dir():
+        return []
+    entries = []
+    for child in sorted(d.iterdir(), key=lambda p: p.name.lower()):
+        if child.is_file() and child.suffix.lower() == ".apk":
+            paths = [child]
+        elif child.is_dir():
+            paths = sorted(p for p in child.iterdir()
+                           if p.is_file() and p.suffix.lower() == ".apk")
+        else:
+            continue          # README.txt, stray zips, anything else
+        if paths:
+            entries.append({"name": child.stem if child.is_file() else child.name,
+                            "paths": [str(p) for p in paths],
+                            "size": sum(p.stat().st_size for p in paths)})
+    return entries
+
+
+def install_failure_hint(output):
+    """Map an `adb install` failure to plain English, or '' if it looks fine."""
+    text = output or ""
+    if "Success" in text and "Failure" not in text:
+        return ""
+    for code, hint in _INSTALL_HINTS.items():
+        if code in text:
+            return hint
+    m = re.search(r"(INSTALL_[A-Z_]+|Failure[^\n]*)", text)
+    return m.group(1).strip() if m else "The phone refused the install."
+
+
+def install_tool(adb, entry, log):
+    """Install one entry from list_tools(). Returns the new package name.
+
+    Not in UNDOABLE: installing a tool isn't destructive, and the tech can
+    remove it from the app list like any other app.
+    """
+    paths = list(entry["paths"])
+    if not paths:
+        raise AdbError("No APK file found for that tool.")
+    before = _package_set(adb)
+    cmd = (["install", "-r"] + paths if len(paths) == 1
+           else ["install-multiple", "-r"] + paths)
+    out = adb.run(cmd, timeout=600)
+    hint = install_failure_hint(out)
+    if hint:
+        log.append(adb.serial, entry["name"], "install-tool", "", cmd, "failed")
+        raise AdbError(hint)
+    # No aapt is bundled, so the package name is whatever newly appeared.
+    # A reinstall of something already present adds nothing -- that's fine.
+    new = sorted(_package_set(adb) - before)
+    pkg = new[0] if len(new) == 1 else ""
+    log.append(adb.serial, pkg or entry["name"], "install-tool", "", cmd, "ok")
+    return pkg
+
+
+def _package_set(adb):
+    try:
+        out = adb.shell_text(["pm", "list", "packages"])
+    except AdbError:
+        return set()
+    return {ln.strip()[len("package:"):] for ln in out.splitlines()
+            if ln.strip().startswith("package:")}
+
+
 def backup_apk(adb, app, dest_dir):
     """Pull the app's APK(s) to dest_dir before removal. Returns saved file paths."""
     out = adb.shell_text(["pm", "path", app.package])

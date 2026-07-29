@@ -641,3 +641,108 @@ def test_delete_file_unsafe_path_never_pulled(log, tmp_path):
     with pytest.raises(ProtectedAppError):
         actions.delete_file(adb, "/data/app/base.apk", log, backup_dir=tmp_path)
     assert not adb.pulled
+
+
+# --- installing vetted tools ------------------------------------------------
+
+class FakeInstallAdb(FakeAdb):
+    """FakeAdb whose `install` outcome the test chooses."""
+
+    def __init__(self, output="Success", adds=("com.synctech.smsbackuprestore",)):
+        super().__init__()
+        self.output, self.adds = output, adds
+
+    def run(self, args, timeout=120):
+        self.calls.append(list(args))
+        self.commands.append(" ".join(args))
+        if args and args[0] in ("install", "install-multiple"):
+            if "Success" in self.output:
+                self.installed.update(self.adds)
+            return self.output
+        return ""
+
+
+def _install_call(adb):
+    """The install command itself -- adb.calls also holds the pm list probes."""
+    return next(c for c in adb.calls if c and c[0].startswith("install"))
+
+
+def _tools_folder(tmp_path):
+    (tmp_path / "README.txt").write_text("not an apk")
+    (tmp_path / "SMS Backup.apk").write_bytes(b"x" * 10)
+    (tmp_path / "notes.zip").write_bytes(b"zip")      # unpacked bundles only
+    split = tmp_path / "Files by Google"
+    split.mkdir()
+    (split / "base.apk").write_bytes(b"y" * 20)
+    (split / "split_config.apk").write_bytes(b"z" * 30)
+    (tmp_path / "empty").mkdir()                      # folder with no apk
+    return tmp_path
+
+
+def _tool(tmp_path, name):
+    entry, = [e for e in actions.list_tools(_tools_folder(tmp_path))
+              if e["name"] == name]
+    return entry
+
+
+def test_list_tools_finds_apks_and_split_folders(tmp_path):
+    entries = actions.list_tools(_tools_folder(tmp_path))
+    by_name = {e["name"]: e for e in entries}
+    assert set(by_name) == {"SMS Backup", "Files by Google"}
+    assert len(by_name["SMS Backup"]["paths"]) == 1
+    assert by_name["SMS Backup"]["size"] == 10
+    # A split bundle is ONE tool whose pieces install together.
+    assert len(by_name["Files by Google"]["paths"]) == 2
+    assert by_name["Files by Google"]["size"] == 50
+
+
+def test_list_tools_empty_when_folder_missing(tmp_path):
+    assert actions.list_tools(tmp_path / "nope") == []
+
+
+def test_install_tool_single_apk_reports_new_package(log, tmp_path):
+    adb = FakeInstallAdb()
+    pkg = actions.install_tool(adb, _tool(tmp_path, "SMS Backup"), log)
+    assert pkg == "com.synctech.smsbackuprestore"
+    assert _install_call(adb)[:2] == ["install", "-r"]
+
+
+def test_install_tool_uses_install_multiple_for_splits(log, tmp_path):
+    adb = FakeInstallAdb()
+    actions.install_tool(adb, _tool(tmp_path, "Files by Google"), log)
+    call = _install_call(adb)
+    assert call[0] == "install-multiple"
+    assert len([a for a in call if a.endswith(".apk")]) == 2
+
+
+def test_install_tool_raises_on_failure_despite_zero_exit(log, tmp_path):
+    """`adb install` has historically printed Failure and still exited 0, so a
+    zero exit alone must never be read as success."""
+    adb = FakeInstallAdb(output="Failure [INSTALL_FAILED_MISSING_SPLIT]")
+    with pytest.raises(AdbError) as e:
+        actions.install_tool(adb, _tool(tmp_path, "SMS Backup"), log)
+    assert "split" in str(e.value).lower()
+    assert log.entries[0]["result"] == "failed"
+
+
+def test_install_tool_is_not_undoable(log, tmp_path):
+    adb = FakeInstallAdb()
+    actions.install_tool(adb, _tool(tmp_path, "SMS Backup"), log)
+    assert not can_undo(log.entries[0])
+
+
+def test_install_tool_no_apk_raises(log):
+    with pytest.raises(AdbError):
+        actions.install_tool(FakeInstallAdb(), {"name": "x", "paths": []}, log)
+
+
+@pytest.mark.parametrize("out,want", [
+    ("Success", ""),
+    ("Failure [INSTALL_FAILED_ALREADY_EXISTS]", "already installed"),
+    ("Failure [INSTALL_FAILED_VERSION_DOWNGRADE]", "newer version"),
+    ("Failure [INSTALL_FAILED_NO_MATCHING_ABIS]", "different processor"),
+    ("Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]", "out of storage"),
+    ("Failure [INSTALL_PARSE_FAILED_NO_CERTIFICATES]", "valid APK"),
+])
+def test_install_failure_hint(out, want):
+    assert want.lower() in actions.install_failure_hint(out).lower()

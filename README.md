@@ -194,13 +194,52 @@ is deleted from either phone.
 1. Plug in the **old** phone → **⬇ Save photos & files to this PC**.
 2. Unplug it, plug in the **new** phone → **⬆ Copy onto the new phone**.
 
-**Contacts, texts and apps don't travel over the cable** — Android blocks that on
-purpose. The easy built-in ways:
-- **Contacts & calendar** already ride on your Google account — just sign into
-  the same account on the new phone.
-- **Apps, texts and the rest** → use the new phone's own **"Copy apps & data"**
-  wizard during setup (on Samsung it's **Smart Switch**). It moves everything,
-  cable-to-cable, no PC needed. The tab has a link with step-by-step help.
+Saving also picks up, when it can:
+
+- **Contacts** — SIM *and* phone memory, merged → `Download/contacts.vcf`. Open
+  it on the new phone to import.
+- **WhatsApp / Signal / Telegram pictures** → `OtherMedia/`. Since Android 11
+  these live outside the normal photo folders, so they'd otherwise be missed.
+- **Texts and picture messages** → but only if the old phone already made a
+  backup of them (see below).
+
+### Getting the texts too
+
+Android won't let any PC read your messages over a cable. The way around it:
+**most old phones have their own backup app** — ZTE Backup, LG Mobile Switch,
+Alcatel Backup, older Samsung tools. On the old phone, open that app and back up
+messages to storage *before* pressing Save. Ad Cleaner finds what it wrote and
+converts it into `Download/sms-restore.xml`, plus pulls any pictures out of MMS
+into `DCIM/OldPhone-MMS/`.
+
+On the new phone, install **SMS Backup & Restore** (by SyncTech) and restore that
+XML file. It has to become the default SMS app while it works — that's Android's
+rule, not a bug; switch back afterwards.
+
+### Installing a tool onto a phone
+
+**📦 Install a tool** installs an APK from `adcleaner_data/tools/` — handy for
+putting SMS Backup & Restore on a phone with no Play Store access.
+
+It only offers APKs from that folder, never a free file picker, and that's on
+purpose: this app exists to strip sideloaded junk off phones, and a mirror-site
+APK is how most of them got infected. Vet a file once, drop it in, reuse it on
+every job. Plain `.apk` files are one tool each; for an `.xapk`/`.apks` bundle,
+unzip it into a subfolder and all the pieces install together.
+
+If the old phone never made such a backup there's nothing to convert, and Save
+just does photos and files as usual.
+
+### What still doesn't travel
+
+- **Apps** → deliberately not copied. On a phone you're cleaning of ad malware,
+  bringing the apps across brings the problem across.
+- **Phone-memory contacts** (as opposed to SIM) → ride on your Google account;
+  sign into the same account on the new phone.
+- **Everything at once** → the new phone's own **"Copy apps & data"** wizard
+  during setup (Samsung calls it **Smart Switch**) is still the easiest route
+  *if both phones are modern enough to support it*. Very old handsets (Android
+  5-era) usually fail that wizard, which is what this tab is for.
 
 ---
 
